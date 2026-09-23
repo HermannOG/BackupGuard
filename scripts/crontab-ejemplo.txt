@@ -1,0 +1,10 @@
+# BackupGuard — entrada de crontab sugerida.
+# Instalar con:  crontab -e
+#
+# El runner revisa cada 5 minutos si alguna estrategia venció su programación.
+# No ejecuta nada por su cuenta: solo lo que el administrador ya aprobó.
+
+*/5 * * * * /usr/bin/php /ruta/completa/BackupGuard/scripts/runner.php >> /var/log/backupguard.log 2>&1
+
+# Para probar sin ejecutar nada (solo listar lo pendiente):
+#   php /ruta/completa/BackupGuard/scripts/runner.php --dry-run
