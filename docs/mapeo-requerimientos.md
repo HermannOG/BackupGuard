@@ -104,7 +104,7 @@ Todos los campos pedidos están en la tabla `ejecuciones` y se muestran en
 | `SIN_PROGRAMACION` | Estrategia activa sin próxima ejecución calculable | advertencia |
 | `SIN_APROBACION` | Estrategia activa con script sin aprobar o sin generar | advertencia |
 | `INACTIVA_PRODUCCION` | Estrategia inactiva sobre una base de producción | advertencia |
-| `EJECUCION_FALLIDA` | Fallo en los últimos 7 días | crítica |
+| `EJECUCION_FALLIDA` | La última ejecución falló (en los últimos 7 días) | crítica |
 | `NO_EJECUTADO` | Programado hace más de 2 horas y no corrió | crítica |
 | `SIN_RESPALDO_RECIENTE` | Prioridad alta sin respaldo en 48 horas | crítica |
 | `SIN_ESTRATEGIA` | Base registrada sin ninguna estrategia | advertencia |

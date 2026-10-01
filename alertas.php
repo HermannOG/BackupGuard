@@ -15,7 +15,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     requiereEdicion();
     $motor->marcarAtendida((int) ($_POST['id'] ?? 0), $_SESSION['usuario']['nombre_usuario']);
     bitacora('atender_alerta', 'alertas', (int) ($_POST['id'] ?? 0));
-    $mensaje = 'Alerta marcada como atendida. Si la condición sigue, volverá a aparecer.';
+    $mensaje = 'Alerta marcada como atendida. No volverá a aparecer mientras la condición siga igual; si cambia, se levanta una alerta nueva.';
 }
 
 $alertas = $motor->evaluar();

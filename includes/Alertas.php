@@ -126,11 +126,13 @@ class Alertas
 
     private function reglaEjecucionFallidaReciente(): void
     {
+        // Solo si la ÚLTIMA ejecución de la estrategia falló: una corrida
+        // exitosa posterior significa que el fallo ya se corrigió.
         $filas = $this->pdo->query("
-            SELECT ej.estrategia_id, e.nombre, MAX(ej.inicio) AS ultima
+            SELECT ej.estrategia_id, e.nombre, ej.inicio AS ultima
               FROM ejecuciones ej JOIN estrategias e ON e.id = ej.estrategia_id
              WHERE ej.resultado = 'fallido' AND ej.inicio >= DATE_SUB(NOW(), INTERVAL 7 DAY)
-             GROUP BY ej.estrategia_id, e.nombre
+               AND ej.id = (SELECT MAX(x.id) FROM ejecuciones x WHERE x.estrategia_id = ej.estrategia_id)
         ")->fetchAll();
 
         foreach ($filas as $f) {
@@ -225,7 +227,10 @@ class Alertas
 
     /**
      * Reemplaza las alertas no atendidas por el estado actual. Las alertas
-     * marcadas como atendidas se conservan como historial.
+     * marcadas como atendidas se conservan como historial y no se vuelven a
+     * levantar mientras la condición siga siendo la misma (mismo código,
+     * entidad y mensaje). Si la condición cambia —por ejemplo, un fallo
+     * nuevo con otra fecha— el mensaje cambia y se levanta una alerta nueva.
      */
     private function persistir(): void
     {
@@ -233,11 +238,21 @@ class Alertas
         try {
             $this->pdo->exec("DELETE FROM alertas WHERE atendida = 0");
 
+            $atendidas = [];
+            foreach ($this->pdo->query("
+                SELECT codigo, estrategia_id, base_datos_id, mensaje FROM alertas WHERE atendida = 1
+            ") as $a) {
+                $atendidas[$this->clave($a)] = true;
+            }
+
             $ins = $this->pdo->prepare("
                 INSERT INTO alertas (codigo, severidad, mensaje, estrategia_id, base_datos_id, detectada_en)
                 VALUES (:c, :s, :m, :e, :b, NOW())
             ");
             foreach ($this->detectadas as $a) {
+                if (isset($atendidas[$this->clave($a)])) {
+                    continue;
+                }
                 $ins->execute([
                     'c' => $a['codigo'], 's' => $a['severidad'], 'm' => $a['mensaje'],
                     'e' => $a['estrategia_id'], 'b' => $a['base_datos_id'],
@@ -248,6 +263,12 @@ class Alertas
             $this->pdo->rollBack();
             throw $e;
         }
+    }
+
+    private function clave(array $a): string
+    {
+        return $a['codigo'] . '|' . ($a['estrategia_id'] ?? '') . '|' .
+               ($a['base_datos_id'] ?? '') . '|' . $a['mensaje'];
     }
 
     public function vigentes(): array
