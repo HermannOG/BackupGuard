@@ -232,7 +232,7 @@ Botón **Guardar estrategia** → lleva a la pantalla de detalle.
 | Comprimir | `AS COMPRESSED BACKUPSET` |
 | Canales en paralelo = n | n × `ALLOCATE CHANNEL` |
 | Retención (días) | `CONFIGURE RETENTION POLICY` + `DELETE OBSOLETE` |
-| Verificar el respaldo | `VALIDATE BACKUPSET ALL` + `RESTORE DATABASE VALIDATE` |
+| Verificar el respaldo | `RESTORE ... VALIDATE` (datos, control file y SPFILE) |
 | Carpeta de destino | Cláusula `FORMAT`; vacío = Fast Recovery Area |
 
 ### Paso 4 — Validación (pantalla de detalle, panel superior)
@@ -480,8 +480,8 @@ runner la toma en su siguiente pasada (la fecha sigue vencida), la ejecuta y
 calcula la próxima.
 
 **¿Cómo se sabe que el respaldo sirve para recuperar?**
-Con *Verificar el respaldo* activado, el script agrega `VALIDATE BACKUPSET ALL`
-y `RESTORE DATABASE VALIDATE`: RMAN lee los respaldos y comprueba que se pueden
+Con *Verificar el respaldo* activado, el script agrega `RESTORE ... VALIDATE`
+para los datos, el control file y el SPFILE: RMAN lee los respaldos y comprueba que se pueden
 restaurar sin escribir nada en la base.
 
 **¿Qué diferencia hay entre simulación y real?**

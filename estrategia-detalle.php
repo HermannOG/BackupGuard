@@ -88,7 +88,7 @@ require_once __DIR__ . '/includes/navbar.php';
 
 <div class="encabezado">
   <div>
-    <h1><?= e($e['nombre']) ?></h1>
+    <h1><span class="mono"><?= e(RmanBuilder::codigo($id)) ?></span> · <?= e($e['nombre']) ?></h1>
     <p class="sub">
       <?= insigniaPrioridad($e['prioridad']) ?>
       <?= insigniaEstado($e['estado']) ?>
@@ -179,6 +179,13 @@ require_once __DIR__ . '/includes/navbar.php';
               <span class="insignia neutra">Sin generar</span>
             <?php endif; ?>
           </td></tr>
+          <tr><th>Archivo RMAN</th><td class="mono">
+            <?php if ($e['archivo_rman']): ?>
+              <a href="catalogo.php?ver=<?= $id ?>"><?= e($e['archivo_rman']) ?></a>
+            <?php else: ?>
+              <span class="muted">Se genera al aprobar el script</span>
+            <?php endif; ?>
+          </td></tr>
           <tr><th>Programación</th><td><?= e(Programacion::describir($e)) ?></td></tr>
           <tr><th>Próxima ejecución</th><td class="mono"><?= formatoFecha($e['proxima_ejecucion']) ?></td></tr>
           <tr><th>Última ejecución</th><td class="mono"><?= formatoFecha($e['ultima_ejecucion']) ?></td></tr>
@@ -190,7 +197,7 @@ require_once __DIR__ . '/includes/navbar.php';
 
     <?php if ($e['estado'] === 'activa' && (int) $e['aprobado'] === 1): ?>
       <?= aviso('exito', 'La estrategia se ejecutará sola en la próxima fecha programada, ' .
-                'siempre que el runner esté activo en el servidor.') ?>
+                'siempre que el ejecutor esté corriendo (iniciar-ejecutor.bat).') ?>
     <?php elseif ($e['estado'] === 'activa'): ?>
       <?= aviso('advertencia', 'La estrategia está activa pero su script no está aprobado, ' .
                 'así que no se ejecutará automáticamente.') ?>

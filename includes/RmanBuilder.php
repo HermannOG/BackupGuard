@@ -166,7 +166,7 @@ class RmanBuilder
         // ---- Encabezado: el script debe poder leerse solo ----
         $l[] = '# =====================================================================';
         $l[] = '# Script RMAN generado por BackupGuard';
-        $l[] = '# Estrategia : ' . $e['nombre'] . ' (id ' . ($e['id'] ?? 's/n') . ')';
+        $l[] = '# Estrategia : ' . (isset($e['id']) ? self::codigo((int) $e['id']) . ' - ' : '') . $e['nombre'];
         $l[] = '# Base       : ' . $this->bd['nombre'] . ' [' . strtoupper($this->bd['ambiente']) . ']';
         $l[] = '# Archivado  : ' . $this->bd['modo_archivado'];
         $l[] = '# Prioridad  : ' . strtoupper($e['prioridad']);
@@ -224,12 +224,15 @@ class RmanBuilder
             $l[] = '';
             $l[] = '# Verificación: comprueba que lo respaldado sirve para restaurar.';
             $l[] = '# No modifica la base; solo lee los respaldos y reporta bloques corruptos.';
-            $l[] = 'VALIDATE BACKUPSET ALL;';
-            if ($e['alcance'] === 'base_completa') {
-                $l[] = 'RESTORE DATABASE VALIDATE;';
-                if ((int) $e['incluir_controlfile'] === 1) {
-                    $l[] = 'RESTORE CONTROLFILE VALIDATE;';
-                }
+            // RESTORE ... VALIDATE elige los respaldos que usaría una
+            // restauración real y los lee completos. (VALIDATE BACKUPSET exige
+            // números de backupset concretos; "ALL" no es sintaxis válida.)
+            $l[] = 'RESTORE ' . $this->objetoBackup() . ' VALIDATE;';
+            if ((int) $e['incluir_controlfile'] === 1) {
+                $l[] = 'RESTORE CONTROLFILE VALIDATE;';
+            }
+            if ((int) $e['incluir_spfile'] === 1) {
+                $l[] = 'RESTORE SPFILE VALIDATE;';
             }
         }
 
@@ -321,7 +324,28 @@ class RmanBuilder
         }
         $destino = rtrim($destino, '/\\');
         $sep = str_contains($destino, '\\') ? '\\' : '/';
-        return " FORMAT '" . $destino . $sep . 'bg_%d_%T_%s_%p.' . $extension . "'";
+        // Las piezas llevan el código de la estrategia: en la carpeta se ve
+        // de un vistazo qué estrategia produjo cada archivo.
+        $prefijo = isset($this->e['id']) ? self::codigo((int) $this->e['id']) : 'EST';
+        return " FORMAT '" . $destino . $sep . $prefijo . '_%d_%T_%s_%p.' . $extension . "'";
+    }
+
+    /** Código de catálogo de una estrategia: EST001, EST002… (también nombre del .rma). */
+    public static function codigo(int $id): string
+    {
+        return sprintf('EST%03d', $id);
+    }
+
+    /**
+     * Texto del script tal como se escribe en el archivo .rma. RMAN en Windows
+     * lee el archivo con la página de códigos del sistema (Windows-1252); en
+     * UTF-8 los comentarios con tildes le llegarían alterados.
+     */
+    public static function paraArchivo(string $script): string
+    {
+        return PHP_OS_FAMILY === 'Windows'
+            ? mb_convert_encoding($script, 'Windows-1252', 'UTF-8')
+            : $script;
     }
 
     /** Etiqueta RMAN: permite ubicar después qué estrategia produjo el respaldo. */
@@ -381,7 +405,7 @@ class RmanBuilder
         $pasos[] = ['CÓMO', 'Paralelismo ' . (int) $e['paralelismo'] . ' → ' .
                             (int) $e['paralelismo'] . ' canal(es) ALLOCATE CHANNEL'];
         if ((int) $e['verificar_respaldo'] === 1) {
-            $pasos[] = ['CÓMO', 'Verificación activada → VALIDATE BACKUPSET ALL + RESTORE ... VALIDATE'];
+            $pasos[] = ['CÓMO', 'Verificación activada → RESTORE ... VALIDATE (datos, control file y SPFILE)'];
         }
         if (!empty($e['retencion_dias'])) {
             $pasos[] = ['CÓMO', 'Retención de ' . (int) $e['retencion_dias'] . ' días → ' .

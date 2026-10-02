@@ -94,6 +94,7 @@ CREATE TABLE IF NOT EXISTS estrategias (
     aprobado        TINYINT(1) NOT NULL DEFAULT 0,
     aprobado_por    VARCHAR(100) NULL,
     aprobado_en     DATETIME NULL,
+    archivo_rman    VARCHAR(400) NULL,  -- EST###.rma aprobado, en disco
 
     ultima_ejecucion   DATETIME NULL,
     proxima_ejecucion  DATETIME NULL,
@@ -115,6 +116,18 @@ CREATE TABLE IF NOT EXISTS estrategia_objetos (
         REFERENCES estrategias(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- Catálogo día-hora de las estrategias semanales: cada día puede tener su
+-- propia hora, o varias (lunes 13:00, jueves 15:00, sábado 17:00 y 19:00).
+CREATE TABLE IF NOT EXISTS estrategia_horarios (
+    id            INT AUTO_INCREMENT PRIMARY KEY,
+    estrategia_id INT NOT NULL,
+    dia_semana    TINYINT NOT NULL,   -- 1=lunes ... 7=domingo
+    hora          TIME NOT NULL,
+    UNIQUE KEY uq_horario (estrategia_id, dia_semana, hora),
+    CONSTRAINT fk_horarios_estrategia FOREIGN KEY (estrategia_id)
+        REFERENCES estrategias(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- ======================= EVIDENCIA DE EJECUCIÓN ======================
 
 CREATE TABLE IF NOT EXISTS ejecuciones (
@@ -132,6 +145,7 @@ CREATE TABLE IF NOT EXISTS ejecuciones (
     salida_rman      LONGTEXT NULL,
     mensaje_error    TEXT NULL,
     ubicacion        VARCHAR(400) NULL,
+    archivo_log      VARCHAR(400) NULL,  -- log de RMAN en disco
     archivos_generados INT NULL,
     tamano_bytes     BIGINT NULL,
     simulado         TINYINT(1) NOT NULL DEFAULT 0,

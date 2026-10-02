@@ -35,8 +35,12 @@ return [
     //   Windows XE 21c: 'C:\\app\\TU_USUARIO\\product\\21c\\homes\\OraDB21Home1\\network\\admin'
     'oracle_tns_admin' => null,
 
-    // Carpeta de trabajo para los cmdfile y logs que genera la herramienta.
+    // Carpeta de trabajo: logs de ejecuciones sin destino propio (FRA).
     'ruta_trabajo' => __DIR__ . '/../storage',
+
+    // Carpeta donde quedan los archivos RMAN aprobados (EST001.rma, ...).
+    // null = <ruta_trabajo>/rman. Ej. Windows: 'C:\\BackupGuard_RMAN\\scripts'
+    'ruta_scripts' => null,
 
     // MODO SIMULACIÓN
     // true  -> no se invoca rman; la ejecución se simula y se marca como tal.

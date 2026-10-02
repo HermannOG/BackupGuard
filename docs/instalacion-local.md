@@ -74,6 +74,8 @@ después borrá ese archivo. La pantalla se cierra sola apenas existe un admin.
 
 Necesario solo cuando quieras que RMAN se ejecute realmente.
 
+> **Para el modo real seguí [`manual-modo-real.md`](manual-modo-real.md)**: es el procedimiento probado de punta a punta. Esta parte quedó desactualizada en tres puntos: el usuario de respaldos debe ser **común** (`c##bgbackup`, `CONTAINER=ALL`) y conectarse al CDB `XE`; al registrarlo, la casilla SYSDBA va **desmarcada** (se conecta `AS SYSBACKUP`); y el ejecutor ahora corre en ciclo con `iniciar-ejecutor.bat`. Del paso 3 (habilitar `oci8`) sí podés seguir usando lo de abajo.
+
 ### 1. Tener una base Oracle
 
 **Oracle Database XE** (Express Edition) es gratuita y suficiente. Instalada

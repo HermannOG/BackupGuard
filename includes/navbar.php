@@ -4,6 +4,7 @@ $actual = basename($_SERVER['PHP_SELF']);
 $enlaces = [
     'index.php'       => 'Tablero',
     'estrategias.php' => 'Estrategias',
+    'catalogo.php'    => 'Catálogo',
     'bases-datos.php' => 'Bases de datos',
     'historial.php'   => 'Historial',
     'alertas.php'     => 'Alertas',

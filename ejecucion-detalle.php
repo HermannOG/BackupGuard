@@ -53,6 +53,10 @@ require_once __DIR__ . '/includes/navbar.php';
           <tr><th>Resultado</th><td><?= insigniaResultado($ej['resultado']) ?></td></tr>
           <tr><th>Código de salida</th><td class="mono"><?= $ej['codigo_salida'] ?? '—' ?></td></tr>
           <tr><th>Ubicación</th><td class="mono"><?= e($ej['ubicacion'] ?: '—') ?></td></tr>
+          <tr><th>Log en disco</th><td class="mono"><?= e($ej['archivo_log'] ?: '—') ?>
+            <?php if ($ej['archivo_log'] && !is_file($ej['archivo_log'])): ?>
+              <span class="insignia bad">ya no existe</span>
+            <?php endif; ?></td></tr>
           <tr><th>Archivos generados</th><td><?= $ej['archivos_generados'] ?? '—' ?></td></tr>
           <tr><th>Tamaño</th><td><?= formatoBytes($ej['tamano_bytes'] !== null ? (int) $ej['tamano_bytes'] : null) ?></td></tr>
           <tr><th>Ejecutado por</th><td><?= e($ej['ejecutado_por'] ?: '—') ?></td></tr>

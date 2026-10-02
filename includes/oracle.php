@@ -167,9 +167,11 @@ function cadenaTargetRman(array $bd): string
         ? $bd['tns_alias']
         : sprintf('%s:%s/%s', $bd['host'], $bd['puerto'], $bd['service_name']);
 
-    $cadena = sprintf('%s/%s@%s', $bd['usuario'], $password, $destino);
-    if ((int) ($bd['conectar_as_sysdba'] ?? 1) === 1) {
-        $cadena .= ' AS SYSDBA';
-    }
-    return $cadena;
+    // RMAN siempre se conecta con un privilegio administrativo: SYSDBA, o
+    // SYSBACKUP para el usuario de respaldos de mínimo privilegio.
+    $privilegio = ((int) ($bd['conectar_as_sysdba'] ?? 1) === 1) ? 'SYSDBA' : 'SYSBACKUP';
+
+    // RMAN rechaza "AS ..." como argumento suelto (RMAN-01009): la cadena
+    // completa tiene que llegarle entre comillas simples.
+    return sprintf("'%s/%s@%s AS %s'", $bd['usuario'], $password, $destino, $privilegio);
 }

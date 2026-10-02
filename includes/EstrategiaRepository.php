@@ -79,7 +79,18 @@ class EstrategiaRepository
 
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
-        return $stmt->fetchAll();
+        $filas = $stmt->fetchAll();
+
+        // Horarios de todas en una sola consulta, para describir la programación.
+        $porEstrategia = [];
+        foreach ($this->pdo->query("SELECT * FROM estrategia_horarios ORDER BY dia_semana, hora") as $h) {
+            $porEstrategia[$h['estrategia_id']][] = $h;
+        }
+        foreach ($filas as &$f) {
+            $f['horarios'] = $porEstrategia[$f['id']] ?? [];
+        }
+        unset($f);
+        return $filas;
     }
 
     public function obtener(int $id): ?array
@@ -91,7 +102,23 @@ class EstrategiaRepository
              WHERE e.id = :id
         ");
         $stmt->execute(['id' => $id]);
-        return $stmt->fetch() ?: null;
+        $e = $stmt->fetch();
+        if (!$e) {
+            return null;
+        }
+        $e['horarios'] = $this->horarios($id);
+        return $e;
+    }
+
+    /** Pares día-hora del catálogo de una estrategia semanal. */
+    public function horarios(int $estrategiaId): array
+    {
+        $stmt = $this->pdo->prepare(
+            "SELECT dia_semana, hora FROM estrategia_horarios
+              WHERE estrategia_id = :id ORDER BY dia_semana, hora"
+        );
+        $stmt->execute(['id' => $estrategiaId]);
+        return $stmt->fetchAll();
     }
 
     public function objetos(int $estrategiaId): array
@@ -131,6 +158,7 @@ class EstrategiaRepository
             $sets = implode(', ', array_map(fn($c) => "$c = :$c", $campos));
             // Editar una estrategia invalida la aprobación anterior: el script
             // cambia, así que debe volver a revisarse.
+            $this->borrarArchivoRma($id);
             $params['id'] = $id;
             $stmt = $this->pdo->prepare(
                 "UPDATE estrategias SET $sets, aprobado = 0, aprobado_por = NULL,
@@ -156,12 +184,25 @@ class EstrategiaRepository
             }
         }
 
+        // Catálogo día-hora: solo aplica a la frecuencia semanal.
+        $this->pdo->prepare("DELETE FROM estrategia_horarios WHERE estrategia_id = :id")
+                  ->execute(['id' => $id]);
+        if (($d['frecuencia'] ?? '') === 'semanal' && !empty($d['horarios'])) {
+            $ins = $this->pdo->prepare(
+                "INSERT IGNORE INTO estrategia_horarios (estrategia_id, dia_semana, hora) VALUES (:e, :d, :h)"
+            );
+            foreach ($d['horarios'] as [$dia, $hora]) {
+                $ins->execute(['e' => $id, 'd' => (int) $dia, 'h' => $hora]);
+            }
+        }
+
         $this->recalcularProxima($id);
         return $id;
     }
 
     public function eliminar(int $id): void
     {
+        $this->borrarArchivoRma($id);
         $this->pdo->prepare("DELETE FROM alertas WHERE estrategia_id = :id")->execute(['id' => $id]);
         $this->pdo->prepare("DELETE FROM ejecuciones WHERE estrategia_id = :id")->execute(['id' => $id]);
         $this->pdo->prepare("DELETE FROM estrategias WHERE id = :id")->execute(['id' => $id]);
@@ -186,6 +227,7 @@ class EstrategiaRepository
         $builder = new RmanBuilder($e, $bd, $this->objetos($id));
         $script = $builder->construir();
 
+        $this->borrarArchivoRma($id);
         $stmt = $this->pdo->prepare("
             UPDATE estrategias
                SET script_rman = :s, script_generado_en = NOW(),
@@ -204,6 +246,59 @@ class EstrategiaRepository
              WHERE id = :id AND script_rman IS NOT NULL
         ");
         $stmt->execute(['u' => $usuario, 'id' => $id]);
+
+        // Aprobar es el "OK" del creador: produce el EST###.rma en disco.
+        if ($stmt->rowCount() > 0) {
+            $this->escribirArchivoRma($id);
+        }
+    }
+
+    // ------------------- Archivo RMAN en disco (.rma) ----------------
+
+    /** Carpeta donde viven los EST###.rma aprobados. */
+    public function carpetaScripts(): string
+    {
+        $c = config();
+        $dir = $c['ruta_scripts'] ?? (($c['ruta_trabajo'] ?? __DIR__ . '/../storage') . '/rman');
+        if (!is_dir($dir) && !@mkdir($dir, 0770, true)) {
+            throw new RuntimeException('No se pudo crear la carpeta de scripts: ' . $dir);
+        }
+        return rtrim(realpath($dir) ?: $dir, '/\\');
+    }
+
+    /**
+     * Escribe el script APROBADO como EST###.rma y guarda la ruta en el
+     * catálogo. Se reescribe siempre desde la base: el archivo en disco nunca
+     * puede diferir de lo que el administrador aprobó.
+     */
+    public function escribirArchivoRma(int $id): string
+    {
+        $e = $this->obtener($id);
+        if (!$e || (int) $e['aprobado'] !== 1 || empty($e['script_rman'])) {
+            throw new RuntimeException('Solo se escribe en disco un script aprobado.');
+        }
+
+        $ruta = $this->carpetaScripts() . DIRECTORY_SEPARATOR . RmanBuilder::codigo($id) . '.rma';
+        if (file_put_contents($ruta, RmanBuilder::paraArchivo($e['script_rman'])) === false) {
+            throw new RuntimeException('No se pudo escribir el archivo RMAN en ' . $ruta);
+        }
+
+        $this->pdo->prepare("UPDATE estrategias SET archivo_rman = :r WHERE id = :id")
+                  ->execute(['r' => $ruta, 'id' => $id]);
+        return $ruta;
+    }
+
+    /** Un script que pierde la aprobación deja de estar en disco. */
+    private function borrarArchivoRma(int $id): void
+    {
+        $stmt = $this->pdo->prepare("SELECT archivo_rman FROM estrategias WHERE id = :id");
+        $stmt->execute(['id' => $id]);
+        $ruta = $stmt->fetchColumn();
+        if ($ruta) {
+            @unlink($ruta);
+            $this->pdo->prepare("UPDATE estrategias SET archivo_rman = NULL WHERE id = :id")
+                      ->execute(['id' => $id]);
+        }
     }
 
     public function recalcularProxima(int $id): void

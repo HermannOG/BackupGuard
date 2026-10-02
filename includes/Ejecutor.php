@@ -8,6 +8,13 @@
  *   - No asume éxito porque rman terminó: revisa el log buscando RMAN-/ORA-.
  *   - Comprueba que los archivos de respaldo existan cuando el destino es local.
  *
+ * Lo que deja en disco cada ejecución (pedido en la hora de consulta):
+ *   - corre el EST###.rma aprobado:  rman target ... cmdfile=EST###.rma log=...
+ *   - en la carpeta destino, junto a las piezas del backup:
+ *       EST###_<fecha>_<hora>.log   el log de RMAN (la evidencia)
+ *       EST###_<fecha>_<hora>.rma   copia del script que se corrió
+ *   Sin destino propio (Fast Recovery Area) quedan en la carpeta de trabajo.
+ *
  * En modo simulación (includes/config.php) no invoca rman: genera una salida
  * verosímil y marca la ejecución como simulada. Sirve para desarrollar sin
  * Oracle y para demostrar un fallo controlado sin tocar ninguna base.
@@ -58,13 +65,23 @@ class Ejecutor
 
         // Registro "en curso": si el proceso muere, queda la huella de que arrancó.
         $ejecucionId = $this->abrirEjecucion($e, $bd, $origen, $script, $inicio);
+        $rutas = null;
 
         try {
             $simular = (bool) ($this->c['modo_simulacion'] ?? true) || $forzarFallo;
 
-            $r = $simular
-                ? $this->correrSimulado($e, $bd, $script, $forzarFallo)
-                : $this->correrRman($e, $bd, $script);
+            // El .rma se reescribe desde el script aprobado antes de cada
+            // corrida, así que es exactamente lo que el administrador aprobó.
+            $rma = $this->repo->escribirArchivoRma($estrategiaId);
+            $rutas = $this->rutasEvidencia($e, $inicio);
+            @copy($rma, $rutas['rma']);
+
+            if ($simular) {
+                $r = $this->correrSimulado($e, $bd, $script, $forzarFallo);
+                @file_put_contents($rutas['log'], $r['salida']);
+            } else {
+                $r = $this->correrRman($bd, $rma, $rutas['log']);
+            }
 
             $fin = new DateTimeImmutable('now');
             $duracion = $fin->getTimestamp() - $inicio->getTimestamp();
@@ -98,6 +115,7 @@ class Ejecutor
                 'salida'       => $r['salida'],
                 'error'        => $this->extraerErrores($r['salida'], $notas),
                 'ubicacion'    => $e['destino'] ?: 'Fast Recovery Area',
+                'log'          => is_file($rutas['log']) ? $rutas['log'] : null,
                 'archivos'     => $conteo['archivos'] ?? null,
                 'tamano'       => $conteo['bytes'] ?? null,
                 'simulado'     => $simular ? 1 : 0,
@@ -123,6 +141,7 @@ class Ejecutor
                 'salida'    => null,
                 'error'     => $ex->getMessage(),
                 'ubicacion' => $e['destino'] ?: null,
+                'log'       => $rutas && is_file($rutas['log']) ? $rutas['log'] : null,
                 'archivos'  => null,
                 'tamano'    => null,
                 'simulado'  => 0,
@@ -149,7 +168,7 @@ class Ejecutor
             't' => $e['tipo_respaldo'] . ($e['modalidad'] ? ' / ' . $e['modalidad'] : ''),
             'i' => $inicio->format('Y-m-d H:i:s'),
             's' => $script,
-            'u' => $_SESSION['usuario']['nombre_usuario'] ?? ($origen === 'programada' ? 'scheduler' : null),
+            'u' => $_SESSION['usuario']['nombre_usuario'] ?? ($origen === 'programada' ? 'ejecutor' : null),
         ]);
         return (int) $this->pdo->lastInsertId();
     }
@@ -160,6 +179,7 @@ class Ejecutor
             UPDATE ejecuciones
                SET fin = :fin, duracion_seg = :dur, resultado = :res, codigo_salida = :cod,
                    salida_rman = :salida, mensaje_error = :err, ubicacion = :ubi,
+                   archivo_log = :log,
                    archivos_generados = :arch, tamano_bytes = :tam, simulado = :sim
              WHERE id = :id
         ");
@@ -171,6 +191,7 @@ class Ejecutor
             'salida' => $d['salida'],
             'err'    => $d['error'] ?: null,
             'ubi'    => $d['ubicacion'],
+            'log'    => $d['log'],
             'arch'   => $d['archivos'],
             'tam'    => $d['tamano'],
             'sim'    => $d['simulado'],
@@ -178,30 +199,27 @@ class Ejecutor
         ]);
     }
 
-    /** Invoca rman de verdad con el script como cmdfile. */
-    private function correrRman(array $e, array $bd, string $script): array
+    /**
+     * Invoca rman de verdad: el system("rman EST001.rma") de la pizarra.
+     * El .rma no contiene la contraseña (va solo en la línea de comandos),
+     * así que se conserva en disco.
+     */
+    private function correrRman(array $bd, string $cmdfile, string $logfile): array
     {
-        $dir = $this->carpetaTrabajo();
-        $sello = date('Ymd_His') . '_' . $e['id'];
-        $cmdfile = $dir . DIRECTORY_SEPARATOR . "bg_$sello.rman";
-        $logfile = $dir . DIRECTORY_SEPARATOR . "bg_$sello.log";
-
-        if (file_put_contents($cmdfile, $script) === false) {
-            throw new RuntimeException('No se pudo escribir el archivo de comandos en ' . $dir);
-        }
-
         $rman = $this->c['rman_bin'] ?? 'rman';
         $target = cadenaTargetRman($bd);
 
-        // La contraseña va en la línea de comandos: se usa escapeshellarg y el
-        // cmdfile se borra apenas termina. En un despliegue real conviene usar
-        // un wallet de Oracle en vez de credenciales en claro.
+        // La contraseña va en la línea de comandos, protegida con
+        // escapeshellarg. En un despliegue real conviene usar un wallet de
+        // Oracle en vez de credenciales en claro.
+        // RMAN no acepta rutas con espacios ni "\" sin comillas propias
+        // (RMAN-02001): las comillas simples le llegan dentro del argumento.
         $comando = sprintf(
             '%s target %s cmdfile=%s log=%s',
             escapeshellarg($rman),
             escapeshellarg($target),
-            escapeshellarg($cmdfile),
-            escapeshellarg($logfile)
+            escapeshellarg("'" . $cmdfile . "'"),
+            escapeshellarg("'" . $logfile . "'")
         );
 
         $salidaDirecta = [];
@@ -212,7 +230,11 @@ class Ejecutor
             ? file_get_contents($logfile)
             : implode("\n", $salidaDirecta);
 
-        @unlink($cmdfile);  // no dejar la contraseña ni el script suelto en disco
+        // RMAN en Windows escribe en la página de códigos del sistema
+        // (Windows-1252), y la columna utf8mb4 rechaza esos bytes.
+        if (!mb_check_encoding($salida, 'UTF-8')) {
+            $salida = mb_convert_encoding($salida, 'UTF-8', 'Windows-1252');
+        }
 
         return ['salida' => $salida, 'codigo' => $codigo];
     }
@@ -290,8 +312,8 @@ class Ejecutor
 
         $rutas = [];
         foreach ($piezas as $i => $ext) {
-            $ruta = sprintf('%s%sbg_%s_%s_%d_1.%s',
-                $destino, DIRECTORY_SEPARATOR,
+            $ruta = sprintf('%s%s%s_%s_%s_%d_1.%s',
+                $destino, DIRECTORY_SEPARATOR, RmanBuilder::codigo((int) $e['id']),
                 preg_replace('/[^A-Za-z0-9]/', '', (string) $bd['nombre']),
                 $sello, $i + 1, $ext
             );
@@ -365,13 +387,47 @@ class Ejecutor
 
         $archivos = 0;
         $bytes = 0;
-        foreach (glob(rtrim($destino, '/\\') . DIRECTORY_SEPARATOR . 'bg_*') ?: [] as $ruta) {
-            if (is_file($ruta) && filemtime($ruta) >= $desde->getTimestamp() - 5) {
+        $destino = rtrim($destino, '/\\');
+        // Piezas EST###_… (o bg_… de scripts aprobados antes del código de
+        // catálogo). RMAN en Windows escribe los nombres en mayúsculas, así que
+        // el prefijo se compara sin distinguir mayúsculas. El .log y el .rma
+        // que deja el propio ejecutor no son piezas del backup.
+        $prefijos = [RmanBuilder::codigo((int) $e['id']) . '_', 'bg_'];
+        foreach (scandir($destino) ?: [] as $nombre) {
+            $ruta = $destino . DIRECTORY_SEPARATOR . $nombre;
+            $ext = strtolower(pathinfo($nombre, PATHINFO_EXTENSION));
+            $esPieza = false;
+            foreach ($prefijos as $p) {
+                $esPieza = $esPieza || stripos($nombre, $p) === 0;
+            }
+            if ($esPieza && !in_array($ext, ['log', 'rma'], true) && is_file($ruta)
+                && filemtime($ruta) >= $desde->getTimestamp() - 5) {
                 $archivos++;
                 $bytes += filesize($ruta);
             }
         }
         return ['archivos' => $archivos, 'bytes' => $bytes];
+    }
+
+    /**
+     * Dónde quedan el log y la copia del script de esta ejecución: junto al
+     * backup si el destino es una carpeta; si es la FRA, en la carpeta de
+     * trabajo. Crea el destino si no existe (RMAN no crea carpetas).
+     *
+     * @return array{log:string, rma:string}
+     */
+    private function rutasEvidencia(array $e, DateTimeImmutable $inicio): array
+    {
+        $destino = rtrim(trim((string) ($e['destino'] ?? '')), '/\\');
+        $dir = $this->carpetaTrabajo();
+        if ($destino !== '' && strtoupper($destino) !== 'FRA'
+            && (is_dir($destino) || @mkdir($destino, 0770, true))) {
+            $dir = $destino;
+        }
+
+        $base = $dir . DIRECTORY_SEPARATOR
+              . RmanBuilder::codigo((int) $e['id']) . '_' . $inicio->format('Ymd_His');
+        return ['log' => $base . '.log', 'rma' => $base . '.rma'];
     }
 
     private function carpetaTrabajo(): string
@@ -380,6 +436,6 @@ class Ejecutor
         if (!is_dir($dir) && !@mkdir($dir, 0770, true)) {
             throw new RuntimeException('No se pudo crear la carpeta de trabajo: ' . $dir);
         }
-        return rtrim($dir, '/\\');
+        return rtrim(realpath($dir) ?: $dir, '/\\');
     }
 }

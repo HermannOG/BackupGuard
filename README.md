@@ -73,22 +73,44 @@ La guía completa —instalar Oracle XE, ponerlo en ARCHIVELOG, crear el usuario
 de respaldos, habilitar `oci8`, programar la tarea— está en
 [`docs/instalacion-local.md`](docs/instalacion-local.md).
 
+Para trabajar **en modo real** (Oracle en ARCHIVELOG, usuario `c##bgbackup`,
+ejecutor automático, carpetas y archivos que se generan) seguí
+[`docs/manual-modo-real.md`](docs/manual-modo-real.md). Las tablas y columnas
+de MySQL están descritas en [`docs/diccionario-de-datos.md`](docs/diccionario-de-datos.md).
+
 ## Automatización
 
-El runner hace una pasada y sale; el planificador del sistema lo invoca cada
-pocos minutos. La computadora tiene que estar encendida a la hora programada.
+Tres piezas, como se definió en clase:
+
+1. **Creador** (`estrategia-form.php`): define la estrategia. Al **aprobar** su
+   script se escribe `EST###.rma` en disco (`ruta_scripts` en `config.php`) y la
+   estrategia queda en el **catálogo** (`catalogo.php`: código, día, hora, archivo).
+2. **Catálogo**: tablas `estrategias` + `estrategia_horarios` (pares día-hora).
+3. **Ejecutor** (`scripts/runner.php`): recorre el catálogo; cuando una estrategia
+   llega a su día y hora corre `rman target ... cmdfile=EST###.rma` y deja en la
+   carpeta destino las piezas del backup, `EST###_<fecha>_<hora>.log` y una copia
+   del `.rma` que se corrió.
+
+El ejecutor puede correr de dos formas:
 
 ```bash
-# Ver qué está pendiente sin ejecutar nada
-php scripts/runner.php --dry-run
+# Agente residente: ciclo infinito, revisa el catálogo cada 30 s (Ctrl+C detiene)
+php scripts/runner.php --loop          # en Windows: iniciar-ejecutor.bat
 
-# Ejecutar lo que corresponda
+# Una sola pasada, para delegar el ciclo en el planificador del sistema
 php scripts/runner.php
+php scripts/runner.php --dry-run       # solo lista lo pendiente
 ```
 
 - Linux: ver `scripts/crontab-ejemplo.txt`
-- Windows: ejecutar `scripts/instalar-tarea-windows.bat` como administrador
+- Windows: `scripts/instalar-tarea-windows.bat` como administrador (Task Scheduler)
 - Oracle Scheduler: un job de tipo EXECUTABLE que llame a `scripts/runner.php`
+
+La computadora tiene que estar encendida, y el ejecutor corriendo, a la hora
+programada.
+
+Bases creadas con una versión anterior de `schema.sql`: aplicar una vez
+`database/migracion-catalogo.sql`.
 
 ## Roles
 
@@ -105,8 +127,10 @@ separación de funciones es parte del control preventivo.
 
 ```
 iniciar.bat / iniciar.sh  Arranca la aplicación en http://localhost:8080
+iniciar-ejecutor.bat      Arranca el ejecutor en ciclo infinito (Windows)
 index.php                 Tablero: métricas, alertas y próximas ejecuciones
 estrategias.php           Listado de estrategias
+catalogo.php              Catálogo: código, día, hora y archivo .rma de cada estrategia
 estrategia-form.php       Construcción de la estrategia (QUÉ · CÓMO · CUÁNDO)
 estrategia-detalle.php    Validación, script RMAN, aprobación y ejecución
 bases-datos.php           Registro de bases Oracle y detección de archivado
@@ -124,8 +148,9 @@ includes/
   crypto.php              Cifrado AES-256-GCM de contraseñas Oracle
   auth.php, db.php, ui.php, header.php, navbar.php, footer.php
 
-scripts/runner.php        Motor de automatización (cron / Task Scheduler)
+scripts/runner.php        Ejecutor: --loop (agente residente) o una pasada (cron / Task Scheduler)
 database/schema.sql       Esquema completo
+database/migracion-catalogo.sql  Migración para bases creadas antes del catálogo día-hora
 docs/                     Instalación local y mapeo de requerimientos
 ```
 

@@ -33,6 +33,10 @@ class Programacion
             return $inicio > $desde ? $inicio : null;
         }
 
+        if ($e['frecuencia'] === 'semanal') {
+            return self::proximaSemanal($e, $desde);
+        }
+
         // Punto de partida: hoy a la hora indicada, nunca antes de fecha_inicio.
         $candidata = new DateTimeImmutable($desde->format('Y-m-d') . ' ' . $hora);
         if ($candidata < $inicio) {
@@ -51,15 +55,66 @@ class Programacion
         return null;
     }
 
+    /**
+     * Semanal: recorre el catálogo día-hora (como el ejecutor de la pizarra:
+     * ¿es el día? ¿es la hora?) y toma el primer par posterior a $desde.
+     */
+    private static function proximaSemanal(array $e, DateTimeImmutable $desde): ?DateTimeImmutable
+    {
+        $horarios = self::horarios($e);
+        if (!$horarios) {
+            return null;
+        }
+
+        $dia = new DateTimeImmutable($desde->format('Y-m-d'));
+        $inicio = new DateTimeImmutable($e['fecha_inicio']);
+        if ($dia < $inicio) {
+            $dia = $inicio;
+        }
+
+        // 8 días: alcanza para volver al mismo día de la semana siguiente.
+        for ($i = 0; $i < 8; $i++) {
+            $n = (int) $dia->format('N');
+            foreach ($horarios as [$d, $hora]) {   // vienen ordenados por día y hora
+                $candidata = new DateTimeImmutable($dia->format('Y-m-d') . ' ' . $hora);
+                if ($d === $n && $candidata > $desde) {
+                    return $candidata;
+                }
+            }
+            $dia = $dia->modify('+1 day');
+        }
+
+        return null;
+    }
+
+    /**
+     * Pares [día, 'HH:MM:SS'] de una estrategia semanal, ordenados.
+     * Sale de estrategia_horarios; las estrategias anteriores al catálogo
+     * día-hora no tienen filas ahí y usan sus días con la hora general.
+     *
+     * @return array<int, array{0:int, 1:string}>
+     */
+    public static function horarios(array $e): array
+    {
+        if (!empty($e['horarios'])) {
+            $pares = array_map(
+                fn($h) => [(int) $h['dia_semana'], substr((string) $h['hora'], 0, 8)],
+                $e['horarios']
+            );
+        } else {
+            $hora = substr((string) ($e['hora'] ?? ''), 0, 8);
+            $pares = $hora === '' ? [] : array_map(fn($d) => [$d, $hora], self::diasSemana($e));
+        }
+
+        usort($pares, fn($a, $b) => [$a[0], $a[1]] <=> [$b[0], $b[1]]);
+        return $pares;
+    }
+
     private static function aplicaEnDia(array $e, DateTimeImmutable $fecha): bool
     {
         switch ($e['frecuencia']) {
             case 'diaria':
                 return true;
-
-            case 'semanal':
-                $dias = self::diasSemana($e);
-                return in_array((int) $fecha->format('N'), $dias, true);
 
             case 'mensual':
                 $diaMes = (int) ($e['dia_mes'] ?? 0);
@@ -100,10 +155,19 @@ class Programacion
                 return 'Todos los días a las ' . $hora;
 
             case 'semanal':
-                $dias = array_map(fn($d) => self::DIAS[$d] ?? '?', self::diasSemana($e));
-                return $dias
-                    ? implode(', ', $dias) . ' a las ' . $hora
-                    : 'Semanal sin días definidos';
+                // "Lunes 13:00 · Jueves 15:00 · Sábado 17:00, 19:00"
+                $porDia = [];
+                foreach (self::horarios($e) as [$d, $h]) {
+                    $porDia[$d][] = substr($h, 0, 5);
+                }
+                if (!$porDia) {
+                    return 'Semanal sin días definidos';
+                }
+                $partes = [];
+                foreach ($porDia as $d => $horas) {
+                    $partes[] = (self::DIAS[$d] ?? '?') . ' ' . implode(', ', $horas);
+                }
+                return implode(' · ', $partes);
 
             case 'mensual':
                 return 'Cada día ' . (int) ($e['dia_mes'] ?? 0) . ' del mes a las ' . $hora;

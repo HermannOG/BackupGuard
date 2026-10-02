@@ -88,8 +88,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'objetos' => array_filter(array_map('trim', explode("\n", $_POST['objetos'] ?? ''))),
     ];
 
-    if ($datos['nombre'] === '') {
-        $error = 'La estrategia necesita un nombre.';
+    // Catálogo día-hora (frecuencia semanal): cada día marcado lleva sus
+    // propias horas ("13:00" o "13:00, 17:00"); si se deja vacío, usa la
+    // hora general.
+    $datos['horarios'] = [];
+    $horasInvalidas = [];
+    foreach ($_POST['dias_semana'] ?? [] as $dia) {
+        $dia = (int) $dia;
+        $texto = trim((string) ($_POST['horas_dia'][$dia] ?? ''));
+        $horas = $texto === '' ? [$datos['hora']] : array_map('trim', explode(',', $texto));
+        foreach ($horas as $h) {
+            if ($h !== null && preg_match('/^([01]?\d|2[0-3]):[0-5]\d$/', $h)) {
+                $datos['horarios'][] = [$dia, sprintf('%05s', $h) . ':00'];
+            } elseif ($h !== null && $h !== '') {
+                $horasInvalidas[] = (Programacion::DIAS[$dia] ?? '?') . ': "' . $h . '"';
+            }
+        }
+    }
+    // La hora general queda como la más temprana del catálogo, para que las
+    // vistas y alertas que solo leen "hora" sigan teniendo un valor.
+    if ($datos['frecuencia'] === 'semanal' && $datos['horarios'] && !$datos['hora']) {
+        $datos['hora'] = min(array_column($datos['horarios'], 1));
+    }
+
+    if ($datos['nombre'] === '' || $horasInvalidas) {
+        $error = $horasInvalidas
+            ? 'Horas no válidas (usá el formato 13:00): ' . implode(', ', $horasInvalidas) . '.'
+            : 'La estrategia necesita un nombre.';
         $e = array_merge($e, $datos);
         $objetosActuales = $datos['objetos'];
     } else {
@@ -110,6 +135,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // y para sugerir los tablespaces existentes.
 $baseElegida = $repo->obtenerBase((int) $e['base_datos_id']);
 $diasSel = Programacion::diasSemana($e);
+
+// Horas por día para rellenar el catálogo día-hora del formulario.
+$horasPorDia = [];
+if (isset($datos['horarios'])) {          // reintento tras un error: lo que se escribió
+    foreach ($_POST['horas_dia'] ?? [] as $d => $texto) {
+        $horasPorDia[(int) $d] = (string) $texto;
+    }
+} else {
+    foreach ($e['horarios'] ?? [] as $h) {
+        $horasPorDia[(int) $h['dia_semana']][] = substr((string) $h['hora'], 0, 5);
+    }
+    $horasPorDia = array_map(fn($hs) => implode(', ', $hs), $horasPorDia);
+}
 
 $tituloPagina = $id ? 'Editar estrategia' : 'Nueva estrategia';
 require_once __DIR__ . '/includes/header.php';
@@ -327,19 +365,37 @@ require_once __DIR__ . '/includes/navbar.php';
       </div>
     </div>
 
-    <div class="rejilla c2">
-      <div class="campo">
-        <label>Días de ejecución (frecuencia semanal)</label>
-        <div style="display:flex;flex-wrap:wrap;gap:.9rem">
+    <div class="campo">
+      <label>Días y horas de ejecución (frecuencia semanal)</label>
+      <div class="ayuda">Este es el catálogo día-hora de la estrategia. Marcá los días y, si querés,
+         una hora distinta para cada uno o varias separadas por coma (13:00, 17:00).
+         Vacío = la hora general de arriba.</div>
+      <div class="tabla-envoltura">
+        <table>
+          <thead><tr><th>Día</th><th>Horas</th></tr></thead>
+          <tbody>
           <?php foreach (Programacion::DIAS as $num => $nombreDia): ?>
-            <label class="check" style="margin:0">
-              <input type="checkbox" name="dias_semana[]" value="<?= $num ?>"
-                     <?= in_array($num, $diasSel, true) ? 'checked' : '' ?>>
-              <span><?= substr($nombreDia, 0, 3) ?></span>
-            </label>
+            <tr>
+              <td>
+                <label class="check" style="margin:0">
+                  <input type="checkbox" name="dias_semana[]" value="<?= $num ?>"
+                         <?= in_array($num, $diasSel, true) ? 'checked' : '' ?>>
+                  <span><?= e($nombreDia) ?></span>
+                </label>
+              </td>
+              <td>
+                <input type="text" name="horas_dia[<?= $num ?>]" inputmode="numeric"
+                       value="<?= e($horasPorDia[$num] ?? '') ?>" placeholder="13:00"
+                       aria-label="Horas del <?= e($nombreDia) ?>">
+              </td>
+            </tr>
           <?php endforeach; ?>
-        </div>
+          </tbody>
+        </table>
       </div>
+    </div>
+
+    <div class="rejilla c2">
       <div class="campo">
         <label for="dia_mes">Día del mes (frecuencia mensual)</label>
         <input type="number" id="dia_mes" name="dia_mes" min="1" max="31"

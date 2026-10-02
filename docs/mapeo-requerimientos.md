@@ -30,7 +30,7 @@ defensa del proyecto y para el documento de diseño.
 | Detección de fallos | `Ejecutor::clasificar()` — revisa el log, no solo el código de salida |
 | Alertas ante incumplimientos | `Alertas.php` (10 reglas) |
 | Conservación de historial | Tablas `ejecuciones` y `bitacora` |
-| Verificación de respaldos | `verificar_respaldo` → `VALIDATE BACKUPSET ALL` + `RESTORE DATABASE VALIDATE` |
+| Verificación de respaldos | `verificar_respaldo` → `RESTORE ... VALIDATE` (datos, control file y SPFILE) |
 
 ## 4–5. Modelo QUÉ – CÓMO – CUÁNDO
 
@@ -53,7 +53,7 @@ encabezado de `includes/RmanBuilder.php` y se muestra al usuario en
 | Compresión | comprimido | `AS COMPRESSED BACKUPSET` |
 | Paralelismo | paralelismo = n | n × `ALLOCATE CHANNEL` |
 | Retención | retencion_dias | `CONFIGURE RETENTION POLICY` + `DELETE OBSOLETE` |
-| Verificación | verificar_respaldo | `VALIDATE BACKUPSET ALL`, `RESTORE ... VALIDATE` |
+| Verificación | verificar_respaldo | `RESTORE ... VALIDATE` |
 | Destino | destino | cláusula `FORMAT`; vacío = Fast Recovery Area |
 
 ## 6. ARCHIVELOG / NOARCHIVELOG
@@ -124,7 +124,7 @@ cuando la Fast Recovery Area supera el 85% de uso.
 | Distinguir recomendación de acción automática | Cuatro niveles de aviso; nada se aplica solo |
 | No asumir éxito porque RMAN no falló | `Ejecutor::clasificar()` revisa el log completo |
 | La existencia del archivo es evidencia | `Ejecutor::contarArchivos()` degrada a advertencia si no hay archivos |
-| Usar RMAN para verificar los respaldos | `VALIDATE BACKUPSET ALL` y `RESTORE ... VALIDATE` |
+| Usar RMAN para verificar los respaldos | `RESTORE ... VALIDATE` |
 | Considerar la recuperación posterior | La verificación prueba restaurabilidad; el modo de archivado condiciona la estrategia |
 
 ## 16. Pregunta orientadora
