@@ -13,6 +13,7 @@
 
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/Programacion.php';
+require_once __DIR__ . '/RmanBuilder.php';
 
 class Alertas
 {
@@ -39,6 +40,7 @@ class Alertas
         $this->reglaSinRespaldoReciente();
         $this->reglaBaseSinEstrategia();
         $this->reglaArchivelogsNoIncluidos();
+        $this->reglaEspacioDestino();
 
         $this->persistir();
         return $this->vigentes();
@@ -211,6 +213,40 @@ class Alertas
                 'La base de "' . $f['nombre'] . '" está en ARCHIVELOG. Considere incorporar el respaldo ' .
                 'periódico de los archived redo logs para mejorar las posibilidades de recuperación.',
                 (int) $f['id']);
+        }
+    }
+
+    /**
+     * Riesgo de disponibilidad: un destino casi lleno hace fallar el respaldo.
+     * Mide el disco donde cae cada estrategia activa con destino propio.
+     * Los umbrales viven en RmanBuilder::nivelEspacio(), compartidos con la
+     * validación. El mensaje da los umbrales y no el valor exacto, para que
+     * una alerta atendida no reaparezca cada vez que cambia el espacio libre.
+     */
+    private function reglaEspacioDestino(): void
+    {
+        try {
+            $filas = $this->pdo->query("
+                SELECT id, nombre, destino FROM estrategias
+                 WHERE estado = 'activa' AND destino IS NOT NULL AND destino <> ''
+            ")->fetchAll();
+
+            foreach ($filas as $f) {
+                $esp = RmanBuilder::espacioDestino($f['destino']);
+                $nivel = $esp ? RmanBuilder::nivelEspacio($esp) : null;
+                if ($nivel === null) {
+                    continue;
+                }
+                $critica = $nivel === 'critica';
+                $this->agregar('ESPACIO_DESTINO', $critica ? 'critica' : 'advertencia',
+                    'El destino "' . $f['destino'] . '" de la estrategia "' . $f['nombre'] . '" tiene ' .
+                    ($critica ? 'muy poco espacio libre (menos del 5 % o de 500 MB). Los respaldos fallarán '
+                              : 'poco espacio libre (menos del 10 % o de 2 GB). Los respaldos podrían fallar ') .
+                    'por falta de espacio. Libere espacio o cambie el destino.',
+                    (int) $f['id']);
+            }
+        } catch (Throwable $e) {
+            return;  // una falla al medir no debe tumbar el resto de las reglas
         }
     }
 

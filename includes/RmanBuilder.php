@@ -135,9 +135,93 @@ class RmanBuilder
         if (empty($e['destino'])) {
             $avisos[] = ['nivel' => 'informacion', 'mensaje' =>
                 'Sin destino explícito: el respaldo se escribirá en la Fast Recovery Area configurada en la base.'];
+        } elseif (($esp = self::espacioDestino($e['destino'])) !== null) {
+            $detalle = self::formatoEspacio($esp['libre']) . ' libres de ' .
+                       self::formatoEspacio($esp['total']) . ' (' . $esp['pct_libre'] . '%)';
+            if (self::nivelEspacio($esp) !== null) {
+                $avisos[] = ['nivel' => 'advertencia', 'mensaje' =>
+                    'Queda poco espacio en el destino del respaldo: ' . $detalle . '. ' .
+                    'Un respaldo puede fallar a medias por falta de espacio; libere espacio o elija otro destino.'];
+            } else {
+                $avisos[] = ['nivel' => 'informacion', 'mensaje' =>
+                    'Espacio disponible en el destino: ' . $detalle . '.'];
+            }
         }
 
         return $avisos;
+    }
+
+    // =================================================================
+    // ESPACIO EN EL DESTINO
+    // =================================================================
+
+    /**
+     * Espacio libre del volumen donde caerá el respaldo. Devuelve null cuando
+     * no se puede medir (sin destino, FRA, ruta inaccesible): en ese caso no
+     * se avisa nada en vez de inventar un dato.
+     *
+     * Si la carpeta aún no existe (la crea la primera ejecución), se mide el
+     * primer directorio existente hacia arriba, que está en el mismo volumen.
+     * Solo ve discos que el servidor de la aplicación puede leer: en un
+     * destino de red o en otro equipo puede no haber dato.
+     */
+    public static function espacioDestino(?string $destino): ?array
+    {
+        $destino = trim((string) $destino);
+        if ($destino === '' || strtoupper($destino) === 'FRA') {
+            return null;
+        }
+        // Una ruta relativa se interpretaría desde otro proceso (RMAN/Oracle):
+        // medirla desde PHP daría el espacio de un disco equivocado.
+        if (!preg_match('~^([A-Za-z]:[\\\\/]|[\\\\/])~', $destino)) {
+            return null;
+        }
+
+        $dir = rtrim($destino, '/\\');
+        for ($i = 0; $i < 32 && $dir !== '' && !is_dir($dir); $i++) {
+            $padre = dirname($dir);
+            if ($padre === $dir) { break; }
+            $dir = $padre;
+        }
+        if ($dir === '' || !is_dir($dir)) {
+            return null;
+        }
+
+        $libre = @disk_free_space($dir);
+        $total = @disk_total_space($dir);
+        if ($libre === false || $total === false || $total <= 0) {
+            return null;
+        }
+
+        return [
+            'libre'     => (int) $libre,
+            'total'     => (int) $total,
+            'pct_libre' => round($libre / $total * 100, 1),
+            'ruta'      => $dir,
+        ];
+    }
+
+    /**
+     * Umbrales únicos para la validación y para la alerta:
+     *   crítica      menos del 5 % libre, o menos de 500 MB
+     *   advertencia  menos del 10 % libre, o menos de 2 GB
+     */
+    public static function nivelEspacio(array $esp): ?string
+    {
+        if ($esp['pct_libre'] < 5 || $esp['libre'] < 500 * 1048576) {
+            return 'critica';
+        }
+        if ($esp['pct_libre'] < 10 || $esp['libre'] < 2 * 1073741824) {
+            return 'advertencia';
+        }
+        return null;
+    }
+
+    private static function formatoEspacio(int $bytes): string
+    {
+        return $bytes >= 1073741824
+            ? round($bytes / 1073741824, 1) . ' GB'
+            : round($bytes / 1048576) . ' MB';
     }
 
     public function tieneErrores(): bool
