@@ -2,6 +2,7 @@
 if (session_status() === PHP_SESSION_NONE) { session_start(); }
 require_once __DIR__ . '/assets.php';
 require_once __DIR__ . '/ui.php';
+require_once __DIR__ . '/ayuda.php';
 $titulo = $tituloPagina ?? null;
 ?>
 <!DOCTYPE html>

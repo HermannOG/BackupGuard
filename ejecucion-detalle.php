@@ -7,6 +7,7 @@ if (session_status() === PHP_SESSION_NONE) { session_start(); }
 require_once __DIR__ . '/includes/db.php';
 require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/ui.php';
+require_once __DIR__ . '/includes/RmanBuilder.php';
 require_once __DIR__ . '/includes/EstrategiaRepository.php';
 
 requiereLogin();
@@ -14,6 +15,32 @@ requiereLogin();
 $repo = new EstrategiaRepository();
 $ej = $repo->obtenerEjecucion((int) ($_GET['id'] ?? 0));
 if (!$ej) { header('Location: historial.php'); exit; }
+$est = $repo->obtener((int) $ej['estrategia_id']);
+
+$duracion = $ej['duracion_seg'] !== null ? (int) $ej['duracion_seg'] : null;
+$ventana  = (int) ($est['ventana_minutos'] ?? 0);
+$codigoEst = RmanBuilder::codigo((int) $ej['estrategia_id']);
+
+// Comprobaciones que respaldan el resultado: lo que BackupGuard revisó.
+// estado: ok | mal | na (no aplica o no se pudo comprobar)
+$checks = [];
+if ($ej['resultado'] !== 'en_curso') {
+    $checks[] = ['RMAN terminó con código de salida 0',
+        $ej['codigo_salida'] === null ? 'na' : ((int) $ej['codigo_salida'] === 0 ? 'ok' : 'mal'),
+        'Código devuelto: ' . ($ej['codigo_salida'] ?? '—')];
+    $checks[] = ['El log no contiene errores RMAN- ni ORA-',
+        $ej['mensaje_error'] ? 'mal' : 'ok',
+        $ej['mensaje_error'] ? 'Se encontraron errores (ver abajo)' : 'Se revisó la salida completa'];
+    $checks[] = ['Terminó dentro de la ventana de respaldo',
+        ($ventana <= 0 || $duracion === null) ? 'na' : ($duracion <= $ventana * 60 ? 'ok' : 'mal'),
+        $ventana > 0 ? 'Ventana de ' . $ventana . ' min · tardó ' . formatoDuracion($duracion) : 'La estrategia no define ventana'];
+    $checks[] = ['Se encontraron archivos del respaldo en el destino',
+        $ej['archivos_generados'] === null ? 'na' : ((int) $ej['archivos_generados'] > 0 ? 'ok' : 'mal'),
+        $ej['archivos_generados'] === null
+            ? 'No inspeccionable desde aquí (Fast Recovery Area o cinta)'
+            : (int) $ej['archivos_generados'] . ' archivo(s) · ' . formatoBytes($ej['tamano_bytes'] !== null ? (int) $ej['tamano_bytes'] : null)];
+}
+$iconos = ['ok' => '✓', 'mal' => '✕', 'na' => '–'];
 
 $tituloPagina = 'Evidencia de ejecución';
 require_once __DIR__ . '/includes/header.php';
@@ -22,65 +49,107 @@ require_once __DIR__ . '/includes/navbar.php';
 
 <div class="encabezado">
   <div>
-    <h1>Evidencia de ejecución #<?= (int) $ej['id'] ?></h1>
-    <p class="sub">
+    <nav class="miga" aria-label="Ruta">
+      <a href="historial.php">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+        Historial
+      </a>
+      <span class="miga-sep" aria-hidden="true">/</span>
+      <span class="miga-actual">Ejecución #<?= (int) $ej['id'] ?></span>
+    </nav>
+    <h1>Evidencia de ejecución <span class="muted">#<?= (int) $ej['id'] ?></span></h1>
+    <p class="sub insignias-fila">
       <?= insigniaResultado($ej['resultado']) ?>
       <?= (int) $ej['simulado'] === 1 ? '<span class="insignia neutra">simulado</span>' : '' ?>
-      · <a href="estrategia-detalle.php?id=<?= (int) $ej['estrategia_id'] ?>"><?= e($ej['estrategia_nombre']) ?></a>
+      <?= insigniaOrigen($ej['origen']) ?>
+      <a href="estrategia-detalle.php?id=<?= (int) $ej['estrategia_id'] ?>" class="enlace-est">
+        <span class="codigo-mini"><?= e($codigoEst) ?></span><?= e($ej['estrategia_nombre']) ?>
+      </a>
     </p>
   </div>
-  <div class="acciones"><a class="boton" href="historial.php">Volver al historial</a></div>
 </div>
 
 <?php if ((int) $ej['simulado'] === 1): ?>
-  <?= aviso('informacion', 'Esta ejecución se realizó en modo simulación: no se invocó RMAN ni se ' .
-            'modificó ninguna base de datos. La salida es representativa, no real.') ?>
+  <?= aviso('informacion', 'Esta ejecución se realizó en modo simulación: no se invocó RMAN ni se modificó ' .
+            'ninguna base de datos. La salida es representativa, no real.') ?>
 <?php endif; ?>
+
+<!-- Datos clave de un vistazo -->
+<div class="rejilla c4 datos-clave">
+  <div class="metrica resultado-<?= e($ej['resultado']) ?>">
+    <div class="etiqueta">Resultado</div>
+    <div class="valor-texto"><?= e(['exitoso' => 'Exitoso', 'advertencia' => 'Con advertencias',
+                                    'fallido' => 'Fallido', 'en_curso' => 'En curso'][$ej['resultado']] ?? $ej['resultado']) ?></div>
+  </div>
+  <div class="metrica">
+    <div class="etiqueta">Duración</div>
+    <div class="valor-texto"><?= formatoDuracion($duracion) ?></div>
+  </div>
+  <div class="metrica">
+    <div class="etiqueta">Tamaño</div>
+    <div class="valor-texto"><?= formatoBytes($ej['tamano_bytes'] !== null ? (int) $ej['tamano_bytes'] : null) ?></div>
+  </div>
+  <div class="metrica">
+    <div class="etiqueta">Ubicación</div>
+    <div class="valor-texto chico mono"><?= e($ej['ubicacion'] ?: '—') ?></div>
+  </div>
+</div>
 
 <div class="rejilla c2">
   <div class="panel">
     <h2>Datos de la ejecución</h2>
-    <div class="tabla-envoltura">
-      <table>
-        <tbody>
-          <tr><th>Estrategia</th><td><?= e($ej['estrategia_nombre']) ?></td></tr>
-          <tr><th>Base de datos</th><td><?= e($ej['base_nombre']) ?></td></tr>
-          <tr><th>Tipo de respaldo</th><td><?= e(str_replace('_', ' ', $ej['tipo_respaldo'])) ?></td></tr>
-          <tr><th>Origen</th><td><?= e($ej['origen']) ?></td></tr>
-          <tr><th>Hora de inicio</th><td class="mono"><?= formatoFecha($ej['inicio']) ?></td></tr>
-          <tr><th>Hora de finalización</th><td class="mono"><?= formatoFecha($ej['fin']) ?></td></tr>
-          <tr><th>Duración</th><td><?= formatoDuracion($ej['duracion_seg'] !== null ? (int) $ej['duracion_seg'] : null) ?></td></tr>
-          <tr><th>Resultado</th><td><?= insigniaResultado($ej['resultado']) ?></td></tr>
-          <tr><th>Código de salida</th><td class="mono"><?= $ej['codigo_salida'] ?? '—' ?></td></tr>
-          <tr><th>Ubicación</th><td class="mono"><?= e($ej['ubicacion'] ?: '—') ?></td></tr>
-          <tr><th>Log en disco</th><td class="mono"><?= e($ej['archivo_log'] ?: '—') ?>
-            <?php if ($ej['archivo_log'] && !is_file($ej['archivo_log'])): ?>
-              <span class="insignia bad">ya no existe</span>
-            <?php endif; ?></td></tr>
-          <tr><th>Archivos generados</th><td><?= $ej['archivos_generados'] ?? '—' ?></td></tr>
-          <tr><th>Tamaño</th><td><?= formatoBytes($ej['tamano_bytes'] !== null ? (int) $ej['tamano_bytes'] : null) ?></td></tr>
-          <tr><th>Ejecutado por</th><td><?= e($ej['ejecutado_por'] ?: '—') ?></td></tr>
-        </tbody>
-      </table>
-    </div>
+    <dl class="datos-lista">
+      <dt>Estrategia</dt>   <dd><?= e($codigoEst . ' · ' . $ej['estrategia_nombre']) ?></dd>
+      <dt>Base de datos</dt><dd><?= e($ej['base_nombre']) ?></dd>
+      <dt>Tipo de respaldo</dt><dd><?= e(tipoRespaldoLegible($ej['tipo_respaldo'])) ?></dd>
+      <dt>Inicio</dt>       <dd class="mono"><?= formatoFecha($ej['inicio']) ?></dd>
+      <dt>Fin</dt>          <dd class="mono"><?= formatoFecha($ej['fin']) ?></dd>
+      <dt>Código de salida</dt><dd class="mono"><?= $ej['codigo_salida'] ?? '—' ?></dd>
+      <dt>Archivos generados</dt><dd><?= $ej['archivos_generados'] ?? '—' ?></dd>
+      <dt>Log en disco</dt>
+      <dd class="mono ruta"><?= e($ej['archivo_log'] ?: '—') ?>
+        <?php if ($ej['archivo_log'] && !is_file($ej['archivo_log'])): ?>
+          <span class="insignia bad">ya no existe</span>
+        <?php endif; ?></dd>
+      <dt>Ejecutado por</dt><dd><?= e($ej['ejecutado_por'] ?: '—') ?></dd>
+    </dl>
   </div>
 
   <div class="panel">
-    <h2>Errores y advertencias</h2>
+    <h2>Comprobaciones
+      <?= porque('¿Por qué no basta con que RMAN termine?',
+          'Un respaldo puede «terminar» y aun así no servir. Por eso BackupGuard no se queda con el código de salida: '
+        . 'revisa el log completo, compara la duración con la ventana y busca los archivos en el destino. '
+        . 'El enunciado pide no asumir que una estrategia es correcta solo porque el script se ejecutó.') ?></h2>
+
+    <?php if ($checks): ?>
+      <ul class="checklist">
+        <?php foreach ($checks as [$texto, $estado, $detalle]): ?>
+          <li class="check-<?= $estado ?>">
+            <span class="check-icono"><?= $iconos[$estado] ?></span>
+            <div><strong><?= e($texto) ?></strong><span><?= e($detalle) ?></span></div>
+          </li>
+        <?php endforeach; ?>
+      </ul>
+    <?php else: ?>
+      <p class="nota">La ejecución todavía está en curso.</p>
+    <?php endif; ?>
+
     <?php if ($ej['mensaje_error']): ?>
       <div class="aviso <?= $ej['resultado'] === 'fallido' ? 'error' : 'advertencia' ?>">
-        <pre class="script" style="background:transparent;border:none;padding:0"><?= e($ej['mensaje_error']) ?></pre>
+        <span class="titulo"><?= $ej['resultado'] === 'fallido' ? 'Errores reportados' : 'Advertencias' ?></span>
+        <pre class="error-texto"><?= e($ej['mensaje_error']) ?></pre>
       </div>
-    <?php else: ?>
-      <?= aviso('exito', 'RMAN no reportó errores ni advertencias en esta ejecución.') ?>
     <?php endif; ?>
-    <p class="nota">Un código de salida 0 no basta: BackupGuard revisa el log completo buscando
-       códigos RMAN- y ORA- antes de dar una ejecución por exitosa.</p>
   </div>
 </div>
 
 <div class="panel">
-  <h2>Salida de RMAN</h2>
+  <div class="panel-titulo">
+    <h2>Salida de RMAN
+      <?= ayuda('Salida de RMAN', 'Todo lo que RMAN escribió durante la ejecución. Las líneas con '
+              . '<span class="mono">RMAN-</span> u <span class="mono">ORA-</span> son errores de Oracle.') ?></h2>
+  </div>
   <?php if ($ej['salida_rman']): ?>
     <pre class="script"><?= e($ej['salida_rman']) ?></pre>
   <?php else: ?>
@@ -88,11 +157,14 @@ require_once __DIR__ . '/includes/navbar.php';
   <?php endif; ?>
 </div>
 
-<div class="panel">
-  <h2>Script ejecutado</h2>
-  <p class="nota">Es el script tal como estaba en el momento de la ejecución, aunque la estrategia
-     se haya modificado después.</p>
+<details class="panel desplegable">
+  <summary>
+    <h2>Script ejecutado
+      <?= ayuda('Script ejecutado', 'El script tal como estaba en el momento de la ejecución, aunque la estrategia '
+              . 'se haya modificado después. Así la evidencia no cambia con el tiempo.') ?></h2>
+    <span class="desplegable-flecha" aria-hidden="true"></span>
+  </summary>
   <pre class="script"><?= e($ej['script_ejecutado']) ?></pre>
-</div>
+</details>
 
 <?php require_once __DIR__ . '/includes/footer.php'; ?>
