@@ -300,12 +300,8 @@ require_once __DIR__ . '/includes/navbar.php';
       <dt>Ventana</dt>
       <dd><?= $e['ventana_minutos'] ? (int) $e['ventana_minutos'] . ' minutos' : '—' ?></dd>
 
-      <dt>Dispositivo</dt>
-      <dd><?= ($e['dispositivo'] ?? 'disco') === 'cinta' ? 'Cinta (SBT)' : 'Disco' ?>
-          <?= !empty($e['dispositivo_id']) ? '<span class="muted">· ' . e($e['dispositivo_id']) . '</span>' : '' ?></dd>
-
       <dt>Destino</dt>
-      <dd class="mono"><?= ($e['dispositivo'] ?? 'disco') === 'cinta' ? 'Media manager' : e($e['destino'] ?: 'Fast Recovery Area') ?></dd>
+      <dd class="mono"><?= e($e['destino'] ?: 'Fast Recovery Area') ?></dd>
     </dl>
 
     <?php if ($activa && $aprobado): ?>

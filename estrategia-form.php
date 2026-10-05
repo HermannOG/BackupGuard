@@ -44,8 +44,8 @@ $e = [
     'tipo_respaldo' => 'incremental_0', 'modalidad' => null, 'comprimido' => 1,
     'paralelismo' => 2, 'retencion_dias' => 14, 'verificar_respaldo' => 1,
     'fecha_inicio' => date('Y-m-d'), 'hora' => '23:00', 'frecuencia' => 'diaria',
-    'intervalo' => 1, 'dias_semana' => '', 'dia_mes' => null, 'ventana_minutos' => 120,
-    'dispositivo' => 'disco', 'dispositivo_id' => '', 'destino' => '',
+    'dias_semana' => '', 'dia_mes' => null, 'ventana_minutos' => 120,
+    'destino' => '',
 ];
 $objetosActuales = [];
 
@@ -85,14 +85,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'fecha_inicio'    => ($_POST['fecha_inicio'] ?? '') ?: null,
         'hora'            => ($_POST['hora'] ?? '') ?: null,
         'frecuencia'      => $_POST['frecuencia'] ?? 'diaria',
-        'intervalo'       => max(1, (int) ($_POST['intervalo'] ?? 1)),
         'dias_semana'     => !empty($_POST['dias_semana']) ? implode(',', array_map('intval', $_POST['dias_semana'])) : null,
         'dia_mes'         => ($_POST['dia_mes'] ?? '') !== '' ? (int) $_POST['dia_mes'] : null,
         'ventana_minutos' => ($_POST['ventana_minutos'] ?? '') !== '' ? (int) $_POST['ventana_minutos'] : null,
-        'dispositivo'     => ($_POST['dispositivo'] ?? 'disco') === 'cinta' ? 'cinta' : 'disco',
-        'dispositivo_id'  => trim($_POST['dispositivo_id'] ?? ''),
-        // En cinta no hay carpeta: el media manager decide dónde guarda.
-        'destino'         => ($_POST['dispositivo'] ?? 'disco') === 'cinta' ? '' : trim($_POST['destino'] ?? ''),
+        'destino'         => trim($_POST['destino'] ?? ''),
 
         'objetos' => array_filter(array_map('trim', explode("\n", $_POST['objetos'] ?? ''))),
     ];
@@ -470,45 +466,29 @@ $chk = fn($cond) => $cond ? 'checked' : '';
       <div><h2>Cuándo respaldar</h2><p>La programación con que el ejecutor automático corre la estrategia.</p></div>
     </div>
 
-    <div class="rejilla c4">
+    <div class="rejilla c3">
       <div class="campo">
         <label for="frecuencia">Frecuencia
           <?= ayuda('Frecuencia', '<b>Una sola vez</b>: en la fecha y hora indicadas.<br>'
-                  . '<b>Por horas</b>: cada cierto número de horas, ideal para archived logs.<br>'
-                  . '<b>Diaria</b>: cada día (o cada N días).<br>'
+                  . '<b>Diaria</b>: todos los días a la hora indicada.<br>'
                   . '<b>Semanal</b>: los días que marques, cada uno con su hora.<br>'
                   . '<b>Mensual</b>: un día fijo del mes.') ?></label>
         <select id="frecuencia" name="frecuencia">
           <option value="unica"   <?= $e['frecuencia'] === 'unica'   ? 'selected' : '' ?>>Una sola vez</option>
-          <option value="horas"   <?= $e['frecuencia'] === 'horas'   ? 'selected' : '' ?>>Por horas</option>
           <option value="diaria"  <?= $e['frecuencia'] === 'diaria'  ? 'selected' : '' ?>>Diaria</option>
           <option value="semanal" <?= $e['frecuencia'] === 'semanal' ? 'selected' : '' ?>>Semanal</option>
           <option value="mensual" <?= $e['frecuencia'] === 'mensual' ? 'selected' : '' ?>>Mensual</option>
         </select>
       </div>
-      <div class="campo" id="campoIntervalo">
-        <label for="intervalo">Intervalo
-          <?= ayuda('Intervalo', 'Cada cuánto se repite. Con <b>1</b> es la frecuencia normal (todos los días, '
-                  . 'todas las semanas…). Con <b>2</b>, uno sí y uno no; con <b>3</b>, cada tres, y así.<br><br>'
-                  . 'Ejemplos: cada <b>4 horas</b> para archived logs, cada <b>2 semanas</b> para un nivel 0.') ?></label>
-        <div class="input-unidad">
-          <span>Cada</span>
-          <input type="number" id="intervalo" name="intervalo" min="1" max="999"
-                 value="<?= (int) ($e['intervalo'] ?? 1) ?>">
-          <span id="unidadIntervalo">días</span>
-        </div>
-      </div>
       <div class="campo">
         <label for="fecha_inicio">Fecha de inicio
-          <?= ayuda('Fecha de inicio', 'A partir de qué día empieza a regir la programación. El intervalo se '
-                  . 'cuenta desde esta fecha.') ?></label>
+          <?= ayuda('Fecha de inicio', 'A partir de qué día empieza a regir la programación.') ?></label>
         <input type="date" id="fecha_inicio" name="fecha_inicio" value="<?= e($e['fecha_inicio']) ?>">
       </div>
       <div class="campo">
         <label for="hora"><span id="etiquetaHora">Hora</span>
           <?= ayuda('Hora', 'Conviene una hora de poca actividad, como la noche, para no afectar a los usuarios. '
-                  . 'En semanal es la hora por defecto de los días sin una propia; en <b>por horas</b>, la hora de la '
-                  . 'primera ejecución.') ?></label>
+                  . 'En la frecuencia semanal funciona como hora por defecto cuando un día no tiene una hora propia.') ?></label>
         <input type="time" id="hora" name="hora" value="<?= e(substr((string) $e['hora'], 0, 5)) ?>">
       </div>
     </div>
@@ -548,50 +528,16 @@ $chk = fn($cond) => $cond ? 'checked' : '';
   <section class="panel bloque">
     <div class="bloque-titulo">
       <span class="seccion-num">5</span>
-      <div><h2>Destino</h2><p>En qué dispositivo y dónde se guardan los archivos del respaldo.</p></div>
+      <div><h2>Destino</h2><p>Dónde se guardan los archivos del respaldo.</p></div>
     </div>
 
-    <label class="etiqueta-grupo">Tipo de dispositivo
-      <?= porque('¿Por qué importa el dispositivo?',
-          'Guardar el respaldo en el mismo disco que la base protege contra errores, pero no contra la falla de '
-        . 'ese disco. Un disco externo, un NAS o una cinta separan la copia del original, que es lo que realmente '
-        . 'reduce el riesgo de disponibilidad.') ?></label>
-    <div class="opciones-tarjeta">
-      <label class="opcion">
-        <input type="radio" name="dispositivo" value="disco" <?= $chk(($e['dispositivo'] ?? 'disco') !== 'cinta') ?>>
-        <span><strong>Disco <em class="etiqueta-rec">DEVICE TYPE DISK</em></strong>
-          <small>Disco local, externo o carpeta de red (NAS). Es lo que usa Oracle XE.</small></span>
-      </label>
-      <label class="opcion">
-        <input type="radio" name="dispositivo" value="cinta" <?= $chk(($e['dispositivo'] ?? '') === 'cinta') ?>>
-        <span><strong>Cinta <em class="etiqueta-rec etiqueta-neutra">DEVICE TYPE SBT</em></strong>
-          <small>Librería de cintas a través de un media manager (por ejemplo, Oracle Secure Backup).</small></span>
-      </label>
-    </div>
-
-    <div class="rejilla c2 separada">
-      <div class="campo">
-        <label for="dispositivo_id">Identificación del dispositivo
-          <?= ayuda('Identificación del dispositivo', 'Un nombre que diga exactamente dónde queda la copia: '
-                  . '<span class="mono">Disco D: externo</span>, <span class="mono">NAS-BACKUP-01</span>, '
-                  . '<span class="mono">Librería LTO-01</span>. Aparece en el script y en la evidencia de cada '
-                  . 'ejecución.') ?></label>
-        <input type="text" id="dispositivo_id" name="dispositivo_id" maxlength="150"
-               value="<?= e($e['dispositivo_id'] ?? '') ?>" placeholder="Ej.: Disco D: externo">
-      </div>
-      <div class="campo" id="campoDestino">
-        <label for="destino">Carpeta de destino
-          <?= ayuda('Carpeta de destino', 'Una ruta completa, como <span class="mono">C:\BackupGuard_RMAN\XE</span>. '
-                  . 'Si la dejás vacía, el respaldo va a la <b>Fast Recovery Area</b> configurada en Oracle.<br><br>'
-                  . 'Al revisar la estrategia, BackupGuard mide el <b>espacio libre</b> del disco y avisa si es poco.') ?></label>
-        <input type="text" id="destino" name="destino" value="<?= e($e['destino']) ?>"
-               placeholder="Vacío = Fast Recovery Area">
-      </div>
-    </div>
-    <div class="aviso advertencia" id="avisoCinta" hidden>
-      <span class="titulo">Requiere un media manager</span>
-      <p>Para respaldar en cinta, el servidor debe tener configurada una biblioteca de media management. En cinta no se
-         indica carpeta: el media manager decide dónde se guarda cada pieza.</p>
+    <div class="campo">
+      <label for="destino">Carpeta de destino
+        <?= ayuda('Carpeta de destino', 'Una ruta completa, como <span class="mono">C:\BackupGuard_RMAN\XE</span>. '
+                . 'Si la dejás vacía, RMAN utiliza la <b>Fast Recovery Area</b> configurada en Oracle.<br><br>'
+                . 'Separar la copia de los archivos originales ayuda a reducir el riesgo de perder ambos ante una falla.') ?></label>
+      <input type="text" id="destino" name="destino" value="<?= e($e['destino']) ?>"
+             placeholder="Vacío = Fast Recovery Area">
     </div>
   </section>
 
@@ -655,15 +601,6 @@ $chk = fn($cond) => $cond ? 'checked' : '';
 
     // --- Programación
     var frec = val('frecuencia');
-    var unidades = { horas: ['hora', 'horas'], diaria: ['día', 'días'], semanal: ['semana', 'semanas'], mensual: ['mes', 'meses'] };
-    var n = parseInt($('#intervalo').value, 10) || 1;
-    mostrar($('#campoIntervalo'), frec !== 'unica');
-    if (unidades[frec]) $('#unidadIntervalo').textContent = n === 1 ? unidades[frec][0] : unidades[frec][1];
-
-    // --- Dispositivo
-    var cinta = val('dispositivo') === 'cinta';
-    mostrar($('#campoDestino'), !cinta);
-    $('#avisoCinta').hidden = !cinta;
     mostrar($('#bloqueSemanal'), frec === 'semanal');
     mostrar($('#bloqueMensual'), frec === 'mensual');
     $('#etiquetaHora').textContent = frec === 'semanal' ? 'Hora por defecto' : 'Hora';
@@ -692,26 +629,22 @@ $chk = fn($cond) => $cond ? 'checked' : '';
     if ($('#comprimido').checked) como += ' comprimido';
 
     var hora = $('#hora').value || '--:--';
-    var n = parseInt($('#intervalo').value, 10) || 1;
     var cuando;
     if (frec === 'unica') cuando = 'una sola vez el ' + ($('#fecha_inicio').value || '(fecha)') + ' a las ' + hora;
-    else if (frec === 'horas') cuando = (n === 1 ? 'cada hora' : 'cada ' + n + ' horas') + ' desde las ' + hora;
-    else if (frec === 'diaria') cuando = (n === 1 ? 'todos los días' : 'cada ' + n + ' días') + ' a las ' + hora;
-    else if (frec === 'mensual') cuando = 'el día ' + ($('#dia_mes').value || '?') + (n === 1 ? ' de cada mes' : ', cada ' + n + ' meses,') + ' a las ' + hora;
+    else if (frec === 'diaria') cuando = 'todos los días a las ' + hora;
+    else if (frec === 'mensual') cuando = 'el día ' + ($('#dia_mes').value || '?') + ' de cada mes a las ' + hora;
     else {
       var dias = [];
       f.querySelectorAll('input[name="dias_semana[]"]:checked').forEach(function (c) { dias.push(DIAS[c.value]); });
-      cuando = dias.length ? 'los ' + dias.join(', ') + (n === 1 ? ' de cada semana' : ', cada ' + n + ' semanas')
+      cuando = dias.length ? 'los ' + dias.join(', ') + ' de cada semana'
                            : 'los días semanales (todavía sin marcar)';
     }
 
     var ret = $('#retencion_dias').value;
     var texto = 'Respalda ' + que + ' con ' + como + ', ' + cuando + '.';
     if (ret) texto += ' Conserva lo necesario para recuperar los últimos ' + ret + ' días.';
-    var cinta = val('dispositivo') === 'cinta';
-    var disp = ($('#dispositivo_id').value || '').trim();
-    var dondeTxt = cinta ? 'en cinta' : (($('#destino').value || '').trim() ? 'en ' + $('#destino').value.trim() : 'en la Fast Recovery Area');
-    texto += ' Se guarda ' + dondeTxt + (disp ? ' (' + disp + ')' : '') + '.';
+    var destino = ($('#destino').value || '').trim();
+    texto += ' Se guarda ' + (destino ? 'en ' + destino : 'en la Fast Recovery Area') + '.';
     if ($('#verificar_respaldo').checked) texto += ' Cada copia se verifica después de crearla.';
     document.getElementById('resumenTexto').textContent = texto;
   }
