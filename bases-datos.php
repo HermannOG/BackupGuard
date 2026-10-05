@@ -371,7 +371,7 @@ require_once __DIR__ . '/includes/navbar.php';
             <input type="radio" name="privilegio" value="sysbackup" checked>
             <span>
               <strong>SYSBACKUP <em class="etiqueta-rec">Recomendado</em></strong>
-              <small>Solo lo necesario para respaldar.<small>
+              <small>Solo lo necesario para respaldar. Úsalo con <span class="mono">c##bgbackup</span>.</small>
             </span>
           </label>
           <label class="opcion">

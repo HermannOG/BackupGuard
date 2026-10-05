@@ -69,6 +69,27 @@ require_once __DIR__ . '/includes/navbar.php';
   </div>
 </div>
 
+<?php
+  // Una ejecución "en curso" que ya superó el tiempo máximo de RMAN no está
+  // corriendo: el proceso se interrumpió antes de guardar el resultado.
+  $limite = (int) (config()['timeout_rman'] ?? 3600);
+  $segundos = time() - strtotime((string) $ej['inicio']);
+?>
+<?php if ($ej['resultado'] === 'en_curso' && $segundos > $limite): ?>
+  <div class="aviso error">
+    <span class="titulo">La ejecución parece interrumpida</span>
+    <p>Empezó hace más de <?= (int) round($limite / 60) ?> minutos y nunca se cerró. Lo más probable es que PHP haya
+       cortado la página antes de que RMAN terminara, por eso no hay salida ni resultado. Revisá el log de RMAN en la
+       carpeta de destino: puede que el respaldo sí se haya completado.</p>
+  </div>
+<?php elseif ($ej['resultado'] === 'en_curso'): ?>
+  <div class="aviso informacion">
+    <span class="titulo">Ejecución en curso</span>
+    <p>RMAN todavía está trabajando. La salida, el resultado y las comprobaciones aparecen cuando termina.
+       Recargá la página en unos minutos.</p>
+  </div>
+<?php endif; ?>
+
 <?php if ((int) $ej['simulado'] === 1): ?>
   <?= aviso('informacion', 'Esta ejecución se realizó en modo simulación: no se invocó RMAN ni se modificó ' .
             'ninguna base de datos. La salida es representativa, no real.') ?>
@@ -153,11 +174,13 @@ require_once __DIR__ . '/includes/navbar.php';
   <?php if ($ej['salida_rman']): ?>
     <pre class="script"><?= e($ej['salida_rman']) ?></pre>
   <?php else: ?>
-    <div class="vacio"><p>No se capturó salida de RMAN para esta ejecución.</p></div>
+    <div class="vacio"><p><?= $ej['resultado'] === 'en_curso'
+        ? 'La salida de RMAN se guarda cuando la ejecución termina.'
+        : 'No se capturó salida de RMAN para esta ejecución.' ?></p></div>
   <?php endif; ?>
 </div>
 
-<details class="panel desplegable">
+<details class="panel desplegable" open>
   <summary>
     <h2>Script ejecutado
       <?= ayuda('Script ejecutado', 'El script tal como estaba en el momento de la ejecución, aunque la estrategia '

@@ -892,6 +892,9 @@ details.panel.desplegable[open] .desplegable-flecha{ transform: rotate(225deg); 
 .visor-rma .panel-titulo h2{ gap: .6rem; }
 .panel + .panel.visor-rma, .visor-rma + .panel{ margin-top: 1.2rem; }
 
+#recuperacion .rejilla{ margin-bottom: 1rem; }
+#recuperacion .aviso{ margin-bottom: .5rem; }
+
 /* ------------------------------ Pie ------------------------------- */
 footer.pie{
     border-top: 1px solid var(--border); background: var(--surface);

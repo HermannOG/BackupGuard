@@ -11,6 +11,11 @@ require_once __DIR__ . '/includes/ui.php';
 require_once __DIR__ . '/includes/oracle.php';
 require_once __DIR__ . '/includes/Programacion.php';
 require_once __DIR__ . '/includes/EstrategiaRepository.php';
+require_once __DIR__ . '/includes/esquema.php';
+
+// Campos opcionales: aparecen solo si la migración ya creó sus columnas.
+$conIntervalo   = soportaIntervalo();
+$conDispositivo = soportaDispositivo();
 
 requiereEdicion();
 
@@ -45,7 +50,7 @@ $e = [
     'paralelismo' => 2, 'retencion_dias' => 14, 'verificar_respaldo' => 1,
     'fecha_inicio' => date('Y-m-d'), 'hora' => '23:00', 'frecuencia' => 'diaria',
     'dias_semana' => '', 'dia_mes' => null, 'ventana_minutos' => 120,
-    'destino' => '',
+    'destino' => '', 'intervalo' => 1, 'dispositivo' => 'disco', 'dispositivo_id' => '',
 ];
 $objetosActuales = [];
 
@@ -92,6 +97,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         'objetos' => array_filter(array_map('trim', explode("\n", $_POST['objetos'] ?? ''))),
     ];
+    if ($conIntervalo) {
+        $datos['intervalo'] = max(1, (int) ($_POST['intervalo'] ?? 1));
+    }
+    if ($conDispositivo) {
+        $datos['dispositivo']    = ($_POST['dispositivo'] ?? 'disco') === 'cinta' ? 'cinta' : 'disco';
+        $datos['dispositivo_id'] = trim($_POST['dispositivo_id'] ?? '');
+        // En cinta no hay carpeta: el media manager decide dónde guarda.
+        if ($datos['dispositivo'] === 'cinta') { $datos['destino'] = ''; }
+    }
 
     // Catálogo día-hora (frecuencia semanal): cada día marcado lleva sus
     // propias horas ("13:00" o "13:00, 17:00"); si se deja vacío, usa la
@@ -466,20 +480,38 @@ $chk = fn($cond) => $cond ? 'checked' : '';
       <div><h2>Cuándo respaldar</h2><p>La programación con que el ejecutor automático corre la estrategia.</p></div>
     </div>
 
-    <div class="rejilla c3">
+    <div class="rejilla <?= $conIntervalo ? 'c4' : 'c3' ?>">
       <div class="campo">
         <label for="frecuencia">Frecuencia
           <?= ayuda('Frecuencia', '<b>Una sola vez</b>: en la fecha y hora indicadas.<br>'
+                  . ($conIntervalo ? '<b>Por horas</b>: cada cierto número de horas, ideal para respaldos frecuentes.<br>' : '')
                   . '<b>Diaria</b>: todos los días a la hora indicada.<br>'
                   . '<b>Semanal</b>: los días que marques, cada uno con su hora.<br>'
                   . '<b>Mensual</b>: un día fijo del mes.') ?></label>
         <select id="frecuencia" name="frecuencia">
           <option value="unica"   <?= $e['frecuencia'] === 'unica'   ? 'selected' : '' ?>>Una sola vez</option>
+          <?php if ($conIntervalo): ?>
+            <option value="horas" <?= $e['frecuencia'] === 'horas' ? 'selected' : '' ?>>Por horas</option>
+          <?php endif; ?>
           <option value="diaria"  <?= $e['frecuencia'] === 'diaria'  ? 'selected' : '' ?>>Diaria</option>
           <option value="semanal" <?= $e['frecuencia'] === 'semanal' ? 'selected' : '' ?>>Semanal</option>
           <option value="mensual" <?= $e['frecuencia'] === 'mensual' ? 'selected' : '' ?>>Mensual</option>
         </select>
       </div>
+      <?php if ($conIntervalo): ?>
+        <div class="campo" id="campoIntervalo">
+          <label for="intervalo">Intervalo
+            <?= ayuda('Intervalo', 'Cada cuánto se repite. Con <b>1</b> es la frecuencia normal (todos los días, '
+                    . 'todas las semanas…). Con <b>2</b>, uno sí y uno no; con <b>3</b>, cada tres, y así.<br><br>'
+                    . 'Ejemplos: cada <b>4 horas</b>, cada <b>2 semanas</b> para un nivel 0. Se cuenta desde la fecha de inicio.') ?></label>
+          <div class="input-unidad">
+            <span>Cada</span>
+            <input type="number" id="intervalo" name="intervalo" min="1" max="999"
+                   value="<?= (int) ($e['intervalo'] ?? 1) ?>">
+            <span id="unidadIntervalo">días</span>
+          </div>
+        </div>
+      <?php endif; ?>
       <div class="campo">
         <label for="fecha_inicio">Fecha de inicio
           <?= ayuda('Fecha de inicio', 'A partir de qué día empieza a regir la programación.') ?></label>
@@ -528,10 +560,44 @@ $chk = fn($cond) => $cond ? 'checked' : '';
   <section class="panel bloque">
     <div class="bloque-titulo">
       <span class="seccion-num">5</span>
-      <div><h2>Destino</h2><p>Dónde se guardan los archivos del respaldo.</p></div>
+      <div><h2>Destino</h2><p>En qué dispositivo y dónde se guardan los archivos del respaldo.</p></div>
     </div>
 
-    <div class="campo">
+    <?php if ($conDispositivo): ?>
+      <label class="etiqueta-grupo">Tipo de dispositivo
+        <?= porque('¿Por qué importa el dispositivo?',
+            'Guardar el respaldo en el mismo disco que la base protege contra errores, pero no contra la falla de '
+          . 'ese disco. Un disco externo, un NAS o una cinta separan la copia del original, que es lo que realmente '
+          . 'reduce el riesgo de disponibilidad.') ?></label>
+      <div class="opciones-tarjeta">
+        <label class="opcion">
+          <input type="radio" name="dispositivo" value="disco" <?= $chk(($e['dispositivo'] ?? 'disco') !== 'cinta') ?>>
+          <span><strong>Disco <em class="etiqueta-rec">DEVICE TYPE DISK</em></strong>
+            <small>Disco local, externo o carpeta de red (NAS). Es lo que usa Oracle XE.</small></span>
+        </label>
+        <label class="opcion">
+          <input type="radio" name="dispositivo" value="cinta" <?= $chk(($e['dispositivo'] ?? '') === 'cinta') ?>>
+          <span><strong>Cinta <em class="etiqueta-rec etiqueta-neutra">DEVICE TYPE SBT</em></strong>
+            <small>Librería de cintas a través de un media manager (por ejemplo, Oracle Secure Backup).</small></span>
+        </label>
+      </div>
+
+      <div class="campo separada">
+        <label for="dispositivo_id">Identificación del dispositivo o almacenamiento
+          <?= ayuda('Identificación del dispositivo', 'Un nombre que diga exactamente dónde queda la copia: '
+                  . '<span class="mono">Disco D: externo</span>, <span class="mono">NAS-BACKUP-01</span>, '
+                  . '<span class="mono">Librería LTO-01</span>. Aparece en el script y en la evidencia de cada ejecución.') ?></label>
+        <input type="text" id="dispositivo_id" name="dispositivo_id" maxlength="150"
+               value="<?= e($e['dispositivo_id'] ?? '') ?>" placeholder="Ej.: Disco C: local">
+      </div>
+      <div class="aviso advertencia" id="avisoCinta" hidden>
+        <span class="titulo">Requiere un media manager</span>
+        <p>Para respaldar en cinta, el servidor debe tener configurada una biblioteca de media management. En cinta no se
+           indica carpeta: el media manager decide dónde se guarda cada pieza.</p>
+      </div>
+    <?php endif; ?>
+
+    <div class="campo" id="campoDestino">
       <label for="destino">Carpeta de destino
         <?= ayuda('Carpeta de destino', 'Una ruta completa, como <span class="mono">C:\BackupGuard_RMAN\XE</span>. '
                 . 'Si la dejás vacía, RMAN utiliza la <b>Fast Recovery Area</b> configurada en Oracle.<br><br>'
@@ -601,6 +667,17 @@ $chk = fn($cond) => $cond ? 'checked' : '';
 
     // --- Programación
     var frec = val('frecuencia');
+    if ($('#campoIntervalo')) {
+      var unidades = { horas: ['hora', 'horas'], diaria: ['día', 'días'], semanal: ['semana', 'semanas'], mensual: ['mes', 'meses'] };
+      var nI = parseInt($('#intervalo').value, 10) || 1;
+      mostrar($('#campoIntervalo'), frec !== 'unica');
+      if (unidades[frec]) $('#unidadIntervalo').textContent = nI === 1 ? unidades[frec][0] : unidades[frec][1];
+    }
+    if ($('#avisoCinta')) {
+      var cinta = val('dispositivo') === 'cinta';
+      mostrar($('#campoDestino'), !cinta);
+      $('#avisoCinta').hidden = !cinta;
+    }
     mostrar($('#bloqueSemanal'), frec === 'semanal');
     mostrar($('#bloqueMensual'), frec === 'mensual');
     $('#etiquetaHora').textContent = frec === 'semanal' ? 'Hora por defecto' : 'Hora';
@@ -629,14 +706,16 @@ $chk = fn($cond) => $cond ? 'checked' : '';
     if ($('#comprimido').checked) como += ' comprimido';
 
     var hora = $('#hora').value || '--:--';
+    var n = $('#intervalo') ? (parseInt($('#intervalo').value, 10) || 1) : 1;
     var cuando;
     if (frec === 'unica') cuando = 'una sola vez el ' + ($('#fecha_inicio').value || '(fecha)') + ' a las ' + hora;
-    else if (frec === 'diaria') cuando = 'todos los días a las ' + hora;
-    else if (frec === 'mensual') cuando = 'el día ' + ($('#dia_mes').value || '?') + ' de cada mes a las ' + hora;
+    else if (frec === 'horas') cuando = (n === 1 ? 'cada hora' : 'cada ' + n + ' horas') + ' desde las ' + hora;
+    else if (frec === 'diaria') cuando = (n === 1 ? 'todos los días' : 'cada ' + n + ' días') + ' a las ' + hora;
+    else if (frec === 'mensual') cuando = 'el día ' + ($('#dia_mes').value || '?') + (n === 1 ? ' de cada mes' : ', cada ' + n + ' meses,') + ' a las ' + hora;
     else {
       var dias = [];
       f.querySelectorAll('input[name="dias_semana[]"]:checked').forEach(function (c) { dias.push(DIAS[c.value]); });
-      cuando = dias.length ? 'los ' + dias.join(', ') + ' de cada semana'
+      cuando = dias.length ? 'los ' + dias.join(', ') + (n === 1 ? ' de cada semana' : ', cada ' + n + ' semanas')
                            : 'los días semanales (todavía sin marcar)';
     }
 
@@ -644,7 +723,10 @@ $chk = fn($cond) => $cond ? 'checked' : '';
     var texto = 'Respalda ' + que + ' con ' + como + ', ' + cuando + '.';
     if (ret) texto += ' Conserva lo necesario para recuperar los últimos ' + ret + ' días.';
     var destino = ($('#destino').value || '').trim();
-    texto += ' Se guarda ' + (destino ? 'en ' + destino : 'en la Fast Recovery Area') + '.';
+    var enCinta = $('#avisoCinta') && val('dispositivo') === 'cinta';
+    var disp = $('#dispositivo_id') ? ($('#dispositivo_id').value || '').trim() : '';
+    texto += ' Se guarda ' + (enCinta ? 'en cinta' : (destino ? 'en ' + destino : 'en la Fast Recovery Area'))
+           + (disp ? ' (' + disp + ')' : '') + '.';
     if ($('#verificar_respaldo').checked) texto += ' Cada copia se verifica después de crearla.';
     document.getElementById('resumenTexto').textContent = texto;
   }

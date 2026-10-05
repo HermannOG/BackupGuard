@@ -114,7 +114,7 @@ class Ejecutor
                 'codigo'       => $r['codigo'],
                 'salida'       => $r['salida'],
                 'error'        => $this->extraerErrores($r['salida'], $notas),
-                'ubicacion'    => $e['destino'] ?: 'Fast Recovery Area',
+                'ubicacion'    => self::ubicacion($e),
                 'log'          => is_file($rutas['log']) ? $rutas['log'] : null,
                 'archivos'     => $conteo['archivos'] ?? null,
                 'tamano'       => $conteo['bytes'] ?? null,
@@ -140,7 +140,7 @@ class Ejecutor
                 'codigo'    => -1,
                 'salida'    => null,
                 'error'     => $ex->getMessage(),
-                'ubicacion' => $e['destino'] ?: null,
+                'ubicacion' => self::ubicacion($e),
                 'log'       => $rutas && is_file($rutas['log']) ? $rutas['log'] : null,
                 'archivos'  => null,
                 'tamano'    => null,
@@ -222,6 +222,14 @@ class Ejecutor
             escapeshellarg("'" . $logfile . "'")
         );
 
+        // Un respaldo real tarda minutos: sin esto, PHP corta la página al
+        // llegar a max_execution_time (120 s en WAMP) a mitad del respaldo y
+        // la ejecución queda "en curso" para siempre. Se usa el límite
+        // timeout_rman de config.php (por defecto 3600 s) más un margen.
+        @set_time_limit((int) ($this->c['timeout_rman'] ?? 3600) + 120);
+        // Si se cierra el navegador, el respaldo y su evidencia terminan igual.
+        ignore_user_abort(true);
+
         $salidaDirecta = [];
         $codigo = 0;
         exec($comando . ' 2>&1', $salidaDirecta, $codigo);
@@ -239,46 +247,138 @@ class Ejecutor
         return ['salida' => $salida, 'codigo' => $codigo];
     }
 
-    /** Salida simulada: sirve para demos y para provocar un fallo controlado. */
+    /**
+     * Salida simulada: sirve para demos y para provocar un fallo controlado.
+     * Recorre el script aprobado y produce, para cada comando, las líneas que
+     * RMAN escribiría, con horas coherentes entre sí y con la duración real
+     * registrada (la simulación dura unos segundos de verdad).
+     */
     private function correrSimulado(array $e, array $bd, string $script, bool $forzarFallo): array
     {
-        $fecha = date('d-M-y H:i:s');
+        $t = time();
+        $hora = function () use (&$t) { return date('d-M-y H:i:s', $t); };
+        $avanza = function (int $seg) use (&$t) { $t += $seg; };
+
+        $canales = max(1, (int) ($e['paralelismo'] ?? 1));
+        $dispositivo = ($e['dispositivo'] ?? 'disco') === 'cinta' ? 'SBT_TAPE' : 'DISK';
+
         $l = [];
-        $l[] = "Recovery Manager: Release 21.0.0.0.0 - Production on $fecha";
-        $l[] = "";
-        $l[] = "[BackupGuard] EJECUCIÓN SIMULADA — no se invocó rman ni se tocó ninguna base.";
-        $l[] = "connected to target database: " . strtoupper($bd['nombre']) . " (DBID=1234567890)";
-        $l[] = "";
+        $l[] = 'Recovery Manager: Release 21.0.0.0.0 - Production on ' . $hora();
+        $l[] = '';
+        $l[] = '[BackupGuard] EJECUCIÓN SIMULADA — no se invocó rman ni se tocó ninguna base.';
+        $l[] = 'connected to target database: ' . strtoupper($bd['nombre']) . ' (DBID=1234567890)';
+        $l[] = '';
+
+        for ($i = 1; $i <= $canales; $i++) {
+            $l[] = "allocated channel: ch$i";
+            $l[] = "channel ch$i: SID=" . (40 + $i) . " device type=$dispositivo";
+        }
+        $l[] = '';
 
         if ($forzarFallo) {
-            $l[] = "Starting backup at $fecha";
-            $l[] = "allocated channel: ch1";
-            $l[] = "channel ch1: starting full datafile backup set";
-            $l[] = "RMAN-00571: ===========================================================";
-            $l[] = "RMAN-03009: failure of backup command on ch1 channel at $fecha";
-            $l[] = "ORA-19809: limit exceeded for recovery files";
-            $l[] = "ORA-19804: cannot reclaim 524288000 bytes disk space from db_recovery_file_dest_size";
+            $l[] = 'Starting backup at ' . $hora();
+            $l[] = 'channel ch1: starting compressed incremental level 0 datafile backup set';
+            $avanza(1);
+            $l[] = 'RMAN-00571: ===========================================================';
+            $l[] = 'RMAN-00569: =============== ERROR MESSAGE STACK FOLLOWS ===============';
+            $l[] = 'RMAN-00571: ===========================================================';
+            $l[] = 'RMAN-03009: failure of backup command on ch1 channel at ' . $hora();
+            $l[] = 'ORA-19809: limit exceeded for recovery files';
+            $l[] = 'ORA-19804: cannot reclaim 524288000 bytes disk space from 10737418240 bytes limit';
+            $l[] = '';
+            $l[] = 'Recovery Manager complete.';
+            sleep(1);
             return ['salida' => implode("\n", $l), 'codigo' => 1];
         }
 
-        $l[] = "Starting backup at $fecha";
-        $l[] = "allocated channel: ch1";
-        $l[] = "channel ch1: starting " . str_replace('_', ' ', $e['tipo_respaldo']) . " datafile backup set";
-        $l[] = "channel ch1: backup set complete, elapsed time: 00:02:17";
+        // ---- BACKUP principal
+        $tipoTxt = match ($e['tipo_respaldo']) {
+            'completo'      => 'full',
+            'incremental_0' => 'incremental level 0',
+            'incremental_1' => 'incremental level 1',
+            default         => 'full',
+        };
+        $comp = (int) ($e['comprimido'] ?? 0) === 1 ? 'compressed ' : '';
+        $l[] = 'Starting backup at ' . $hora();
+        for ($i = 1; $i <= $canales; $i++) {
+            $l[] = "channel ch$i: starting {$comp}{$tipoTxt} datafile backup set";
+        }
+        $avanza(1);
+        $piezas = $this->escribirPiezasSimuladas($e, $bd);
+        foreach ($piezas as $ruta) {
+            $l[] = "piece handle=$ruta tag=" . (preg_match("/TAG '([^']+)'/", $script, $m) ? $m[1] : 'SIMULADO') . ' comment=NONE';
+        }
+        for ($i = 1; $i <= $canales; $i++) {
+            $l[] = "channel ch$i: backup set complete, elapsed time: 00:00:01";
+        }
+        if (stripos($script, 'INCLUDE CURRENT CONTROLFILE') !== false) {
+            $l[] = 'including current control file in backup set';
+        }
+        $l[] = 'Finished backup at ' . $hora();
 
-        // La evidencia incluye la existencia del archivo, no solo el log. En
-        // simulación se escriben piezas de marcador en el destino para que la
-        // comprobación posterior (contarArchivos) tenga algo real que medir.
-        foreach ($this->escribirPiezasSimuladas($e, $bd) as $ruta) {
-            $l[] = "piece handle=$ruta tag=SIMULADO";
+        if (stripos($script, 'BACKUP SPFILE') !== false) {
+            $l[] = '';
+            $l[] = 'Starting backup at ' . $hora();
+            $l[] = 'channel ch1: starting full datafile backup set';
+            $l[] = 'including current SPFILE in backup set';
+            $l[] = 'channel ch1: backup set complete, elapsed time: 00:00:01';
+            $l[] = 'Finished backup at ' . $hora();
+        }
+        for ($i = 1; $i <= $canales; $i++) {
+            $l[] = "released channel: ch$i";
         }
 
-        $l[] = "Finished backup at " . date('d-M-y H:i:s', time() + 137);
-        $l[] = "";
-        $l[] = "Starting Control File and SPFILE Autobackup at $fecha";
-        $l[] = "Finished Control File and SPFILE Autobackup at $fecha";
-        $l[] = "";
-        $l[] = "Recovery Manager complete.";
+        // ---- Verificación
+        if (stripos($script, 'VALIDATE') !== false) {
+            $avanza(1);
+            $l[] = '';
+            $l[] = 'Starting restore at ' . $hora();
+            $l[] = 'using channel ORA_DISK_1';
+            $l[] = 'channel ORA_DISK_1: starting validation of datafile backup set';
+            $l[] = 'channel ORA_DISK_1: validation complete, elapsed time: 00:00:01';
+            $l[] = 'Finished restore at ' . $hora();
+            if (stripos($script, 'RESTORE CONTROLFILE VALIDATE') !== false) {
+                $l[] = 'channel ORA_DISK_1: validation of control file backup complete';
+            }
+            if (stripos($script, 'RESTORE SPFILE VALIDATE') !== false) {
+                $l[] = 'channel ORA_DISK_1: validation of SPFILE backup complete';
+            }
+        }
+
+        // ---- Limpieza por retención
+        if (stripos($script, 'DELETE NOPROMPT OBSOLETE') !== false) {
+            $l[] = '';
+            $l[] = 'crosschecked backup piece: found to be \'AVAILABLE\'';
+            $l[] = 'Crosschecked ' . (count($piezas) ?: 2) . ' objects';
+            $l[] = 'specification does not match any backup in the repository';
+            $l[] = 'RMAN retention policy will be applied to the command';
+            $l[] = 'no obsolete backups found';
+        }
+
+        // ---- Reporte final
+        $l[] = '';
+        $l[] = 'List of Backups';
+        $l[] = '===============';
+        $l[] = 'Key     TY LV S Device Type Completion Time    #Pieces #Copies Compressed Tag';
+        $l[] = '------- -- -- - ----------- ------------------ ------- ------- ---------- ---';
+        $lv = $e['tipo_respaldo'] === 'incremental_1' ? '1' : ($e['tipo_respaldo'] === 'incremental_0' ? '0' : 'F');
+        $tag = preg_match("/TAG '([^']+)'/", $script, $m) ? $m[1] : 'SIMULADO';
+        $l[] = sprintf('%-7s B  %-2s A %-11s %-18s %-7s %-7s %-10s %s', '1', $lv, $dispositivo === 'DISK' ? 'DISK' : 'SBT_TAPE',
+                       $hora(), '1', '1', $comp ? 'YES' : 'NO', $tag);
+        if (stripos($script, 'REPORT NEED BACKUP') !== false) {
+            $l[] = '';
+            $l[] = 'Report of files that need backup due to retention policy';
+            $l[] = 'File Days  Name';
+            $l[] = '---- ----- -----------------------------------------------------';
+            $l[] = '(ninguno: todos los archivos están protegidos)';
+        }
+        $l[] = '';
+        $l[] = 'Recovery Manager complete.';
+
+        // La simulación tarda lo mismo que dicen sus horas: la duración
+        // registrada y la salida quedan coherentes.
+        $espera = $t - time();
+        if ($espera > 0) { sleep(min($espera, 5)); }
 
         return ['salida' => implode("\n", $l), 'codigo' => 0];
     }
@@ -375,6 +475,20 @@ class Ejecutor
 
         $mensajes = array_slice(array_unique($mensajes), 0, 20);
         return implode("\n", $mensajes);
+    }
+
+    /**
+     * Texto de ubicación para la evidencia: dispositivo + carpeta (o FRA),
+     * con la identificación del almacenamiento si se indicó.
+     */
+    private static function ubicacion(array $e): string
+    {
+        $id = trim((string) ($e['dispositivo_id'] ?? ''));
+        $sufijo = $id !== '' ? ' · ' . $id : '';
+        if (($e['dispositivo'] ?? 'disco') === 'cinta') {
+            return 'Cinta (SBT)' . $sufijo;
+        }
+        return (trim((string) ($e['destino'] ?? '')) ?: 'Fast Recovery Area') . $sufijo;
     }
 
     /** Cuenta archivos nuevos en el destino: evidencia física del respaldo. */

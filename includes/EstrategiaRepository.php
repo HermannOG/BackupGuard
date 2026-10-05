@@ -7,6 +7,7 @@
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/Programacion.php';
 require_once __DIR__ . '/RmanBuilder.php';
+require_once __DIR__ . '/esquema.php';
 
 class EstrategiaRepository
 {
@@ -141,6 +142,14 @@ class EstrategiaRepository
             'retencion_dias', 'verificar_respaldo', 'fecha_inicio', 'hora',
             'frecuencia', 'dias_semana', 'dia_mes', 'ventana_minutos', 'destino',
         ];
+        // Campos opcionales: solo si la migración ya creó sus columnas.
+        if (soportaIntervalo() && array_key_exists('intervalo', $d)) {
+            $campos[] = 'intervalo';
+        }
+        if (soportaDispositivo() && array_key_exists('dispositivo', $d)) {
+            $campos[] = 'dispositivo';
+            $campos[] = 'dispositivo_id';
+        }
 
         $params = [];
         foreach ($campos as $c) {

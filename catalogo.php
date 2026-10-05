@@ -29,49 +29,32 @@ $estrategias = $repo->listar();
  */
 function filasCatalogo(array $e): array
 {
-    $hora = $e['hora']
-        ? substr((string) $e['hora'], 0, 5)
-        : '—';
+    $hora = $e['hora'] ? substr((string) $e['hora'], 0, 5) : '—';
+    $n = Programacion::intervalo($e);   // 1 si la base no tiene la columna
 
     switch ($e['frecuencia']) {
         case 'semanal':
             $filas = array_map(
-                fn($p) => [
-                    Programacion::DIAS[$p[0]] ?? '?',
-                    substr($p[1], 0, 5)
-                ],
+                fn($p) => [(Programacion::DIAS[$p[0]] ?? '?') . ($n > 1 ? ' (cada ' . $n . ' semanas)' : ''),
+                           substr($p[1], 0, 5)],
                 Programacion::horarios($e)
             );
-
             return $filas ?: [['Sin días', '—']];
 
+        case 'horas':
+            return [[$n === 1 ? 'Cada hora' : 'Cada ' . $n . ' horas', 'desde ' . $hora]];
+
         case 'diaria':
-            return [
-                ['Todos los días', $hora]
-            ];
+            return [[$n === 1 ? 'Todos los días' : 'Cada ' . $n . ' días', $hora]];
 
         case 'mensual':
-            return [
-                [
-                    'Día ' . (int) $e['dia_mes'] . ' de cada mes',
-                    $hora
-                ]
-            ];
+            return [['Día ' . (int) $e['dia_mes'] . ($n === 1 ? ' de cada mes' : ', cada ' . $n . ' meses'), $hora]];
 
         case 'unica':
-            return [
-                [
-                    $e['fecha_inicio']
-                        ? 'Solo el ' . $e['fecha_inicio']
-                        : 'Una vez',
-                    $hora
-                ]
-            ];
+            return [[$e['fecha_inicio'] ? 'Solo el ' . $e['fecha_inicio'] : 'Una vez', $hora]];
     }
 
-    return [
-        ['—', $hora]
-    ];
+    return [['—', $hora]];
 }
 
 

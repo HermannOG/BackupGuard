@@ -300,6 +300,11 @@ require_once __DIR__ . '/includes/navbar.php';
       <dt>Ventana</dt>
       <dd><?= $e['ventana_minutos'] ? (int) $e['ventana_minutos'] . ' minutos' : '—' ?></dd>
 
+      <?php if (array_key_exists('dispositivo', $e)): ?>
+        <dt>Dispositivo</dt>
+        <dd><?= ($e['dispositivo'] ?? 'disco') === 'cinta' ? 'Cinta (SBT)' : 'Disco' ?>
+            <?= !empty($e['dispositivo_id']) ? '<span class="muted">· ' . e($e['dispositivo_id']) . '</span>' : '' ?></dd>
+      <?php endif; ?>
       <dt>Destino</dt>
       <dd class="mono"><?= e($e['destino'] ?: 'Fast Recovery Area') ?></dd>
     </dl>
@@ -380,6 +385,43 @@ require_once __DIR__ . '/includes/navbar.php';
     <?php endif; ?>
   </div>
 </div>
+
+<!-- ===================== PLAN DE RECUPERACIÓN ===================== -->
+<?php $plan = $builder->planRecuperacion(); ?>
+<details class="panel desplegable" id="recuperacion">
+  <summary>
+    <h2>Plan de recuperación
+      <?= porque('¿Por qué un plan de recuperación?',
+          'Un respaldo solo vale si se puede restaurar. El enunciado pide que la estrategia considere también la '
+        . 'posibilidad posterior de recuperación. Este plan dice qué respaldos hacen falta y qué instrucciones RMAN '
+        . 'restaurarían la información. BackupGuard <b>no lo ejecuta</b>: la recuperación es destructiva y solo debe '
+        . 'hacerse en un ambiente controlado.') ?></h2>
+    <span class="desplegable-flecha" aria-hidden="true"></span>
+  </summary>
+
+  <div class="rejilla c2">
+    <div>
+      <p class="etiqueta-grupo">Respaldos necesarios para restaurar</p>
+      <ul class="checklist">
+        <?php foreach ($plan['necesarios'] as $n): ?>
+          <li class="check-na"><span class="check-icono">•</span><div><strong><?= e($n) ?></strong></div></li>
+        <?php endforeach; ?>
+      </ul>
+    </div>
+    <div>
+      <p class="etiqueta-grupo">A tener en cuenta</p>
+      <?php foreach ($plan['notas'] as $n): ?>
+        <div class="aviso informacion"><p><?= e($n) ?></p></div>
+      <?php endforeach; ?>
+    </div>
+  </div>
+
+  <p class="etiqueta-grupo">Script de restauración
+    <?= ayuda('Script de restauración', 'Instrucciones RMAN para restaurar lo que protege esta estrategia. La primera, '
+            . '<span class="mono">RESTORE ... PREVIEW</span>, no modifica nada: solo muestra qué respaldos usaría RMAN. '
+            . 'Las demás detienen o modifican la base, por eso solo deben correrse en un ambiente de pruebas.') ?></p>
+  <pre class="script"><?= e($plan['script']) ?></pre>
+</details>
 
 <!-- ===================== EVIDENCIA ===================== -->
 <div class="panel" id="evidencia">

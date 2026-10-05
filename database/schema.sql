@@ -80,12 +80,15 @@ CREATE TABLE IF NOT EXISTS estrategias (
     -- ----- CUÁNDO respaldar -----
     fecha_inicio    DATE NULL,
     hora            TIME NULL,
-    frecuencia      ENUM('unica','diaria','semanal','mensual') NOT NULL DEFAULT 'diaria',
+    frecuencia      ENUM('unica','horas','diaria','semanal','mensual') NOT NULL DEFAULT 'diaria',
+    intervalo       SMALLINT NOT NULL DEFAULT 1,  -- cada N horas / días / semanas / meses
     dias_semana     VARCHAR(20) NULL,   -- '1,3,5' (1=lunes ... 7=domingo)
     dia_mes         TINYINT NULL,
     ventana_minutos INT NULL,           -- duración máxima aceptable de la ventana
 
     -- ----- Destino -----
+    dispositivo     ENUM('disco','cinta') NOT NULL DEFAULT 'disco',  -- DEVICE TYPE DISK / SBT
+    dispositivo_id  VARCHAR(150) NULL,  -- identificación del dispositivo o almacenamiento
     destino         VARCHAR(255) NULL,  -- carpeta o 'FRA' (Fast Recovery Area)
 
     -- ----- Script y aprobación -----
