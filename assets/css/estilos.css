@@ -989,3 +989,14 @@ main{ flex: 1 0 auto; }
     *{ animation: none !important; transition: none !important; }
 }
 [hidden]{ display: none !important; }
+
+/* Controles nativos (selector de hora, fecha, listas) en tema oscuro */
+:root{ color-scheme: dark; }
+input, select, textarea{ accent-color: var(--amber); }
+input[type=time]::-webkit-calendar-picker-indicator,
+input[type=date]::-webkit-calendar-picker-indicator{
+    cursor: pointer; opacity: .7;
+}
+input[type=time]::-webkit-calendar-picker-indicator:hover,
+input[type=date]::-webkit-calendar-picker-indicator:hover{ opacity: 1; }
+[hidden]{ display: none !important; }
