@@ -988,3 +988,4 @@ main{ flex: 1 0 auto; }
 @media (prefers-reduced-motion: reduce){
     *{ animation: none !important; transition: none !important; }
 }
+[hidden]{ display: none !important; }
