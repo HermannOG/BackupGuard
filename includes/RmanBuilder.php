@@ -18,10 +18,14 @@
  *   tipo=incremental_1 acum.   -> BACKUP INCREMENTAL LEVEL 1 CUMULATIVE
  *   comprimido                 -> AS COMPRESSED BACKUPSET
  *   paralelismo=n              -> n canales ALLOCATE CHANNEL
+ *   dispositivo=disco          -> ALLOCATE CHANNEL ... DEVICE TYPE DISK
+ *   dispositivo=cinta          -> ALLOCATE CHANNEL ... DEVICE TYPE SBT (media manager)
  *   incluir_controlfile        -> INCLUDE CURRENT CONTROLFILE
  *   incluir_spfile             -> BACKUP SPFILE
  *   incluir_archivelogs        -> PLUS ARCHIVELOG [DELETE INPUT]
- *   retencion_dias             -> CONFIGURE RETENTION POLICY + DELETE OBSOLETE
+ *   retencion_dias             -> DELETE OBSOLETE RECOVERY WINDOW OF n DAYS, solo
+ *                                 DESPUÉS de verificar (no se usa CONFIGURE: cambiaría
+ *                                 la política de toda la base y chocaría entre estrategias)
  *   verificar_respaldo         -> RESTORE ... VALIDATE (prueba de recuperabilidad)
  */
 class RmanBuilder
@@ -123,6 +127,44 @@ class RmanBuilder
             $avisos[] = ['nivel' => 'error', 'mensaje' =>
                 'Una frecuencia mensual requiere indicar el día del mes.'];
         }
+        $intervalo = (int) ($e['intervalo'] ?? 1);
+        if ($e['frecuencia'] !== 'unica' && $intervalo < 1) {
+            $avisos[] = ['nivel' => 'error', 'mensaje' =>
+                'El intervalo de repetición debe ser al menos 1.'];
+        }
+        if ($e['frecuencia'] === 'horas' && $intervalo >= 1 && !empty($e['ventana_minutos'])
+            && (int) $e['ventana_minutos'] > $intervalo * 60) {
+            $avisos[] = ['nivel' => 'advertencia', 'mensaje' =>
+                'La ventana de respaldo (' . (int) $e['ventana_minutos'] . ' min) es más larga que el intervalo ' .
+                'entre ejecuciones (cada ' . $intervalo . ' h): una ejecución podría empezar antes de que ' .
+                'termine la anterior. Aumentá el intervalo o reducí la ventana.'];
+        }
+        if ($e['frecuencia'] === 'horas' && $e['tipo_respaldo'] !== 'incremental_1' && $intervalo < 24) {
+            $avisos[] = ['nivel' => 'recomendacion', 'mensaje' =>
+                'Respaldar varias veces al día con un respaldo completo o de nivel 0 consume mucho espacio y ' .
+                'tiempo. Para ejecuciones cada pocas horas suele convenir un incremental nivel 1 o solo los ' .
+                'archived redo logs.'];
+        }
+
+        // --- Dispositivo ---
+        if (($e['dispositivo'] ?? 'disco') === 'cinta') {
+            $avisos[] = ['nivel' => 'advertencia', 'mensaje' =>
+                'El dispositivo es cinta (SBT). RMAN necesita una biblioteca de media management ' .
+                'configurada (por ejemplo, Oracle Secure Backup); sin ella, el respaldo fallará. ' .
+                'Confirmá que el servidor la tiene antes de aprobar.'];
+        }
+        if (array_key_exists('dispositivo_id', $e) && trim((string) $e['dispositivo_id']) === '') {
+            $avisos[] = ['nivel' => 'informacion', 'mensaje' =>
+                'No se identificó el dispositivo o almacenamiento. Indicarlo (por ejemplo, "Disco D: externo" ' .
+                'o "NAS-BACKUP-01") deja claro en la evidencia dónde quedó cada respaldo.'];
+        }
+
+        if (!empty($e['retencion_dias']) && (int) $e['verificar_respaldo'] === 0) {
+            $avisos[] = ['nivel' => 'recomendacion', 'mensaje' =>
+                'La estrategia borra respaldos viejos por retención pero no verifica el nuevo. Si el respaldo ' .
+                'de hoy saliera dañado, se habrían eliminado los anteriores que sí servían. Active la verificación ' .
+                'para que la limpieza solo ocurra cuando el respaldo nuevo se pudo validar.'];
+        }
 
         // --- Riesgo por ambiente ---
         if (($this->bd['ambiente'] ?? '') === 'produccion') {
@@ -132,7 +174,9 @@ class RmanBuilder
         }
 
         // --- Destino ---
-        if (empty($e['destino'])) {
+        if (($e['dispositivo'] ?? 'disco') === 'cinta') {
+            // En cinta no hay carpeta: el media manager decide dónde se guarda.
+        } elseif (empty($e['destino'])) {
             $avisos[] = ['nivel' => 'informacion', 'mensaje' =>
                 'Sin destino explícito: el respaldo se escribirá en la Fast Recovery Area configurada en la base.'];
         } elseif (($esp = self::espacioDestino($e['destino'])) !== null) {
@@ -255,23 +299,19 @@ class RmanBuilder
         $l[] = '# Archivado  : ' . $this->bd['modo_archivado'];
         $l[] = '# Prioridad  : ' . strtoupper($e['prioridad']);
         $l[] = '# Tipo       : ' . $this->etiquetaTipo();
+        $l[] = '# Dispositivo: ' . $this->tipoDispositivo()
+             . (trim((string) ($e['dispositivo_id'] ?? '')) !== '' ? ' — ' . trim((string) $e['dispositivo_id']) : '');
         $l[] = '# Generado   : ' . date('Y-m-d H:i:s');
         $l[] = '# Revisá este script antes de aprobarlo. BackupGuard no lo ejecuta sin aprobación.';
         $l[] = '# =====================================================================';
         $l[] = '';
-
-        // ---- Política de retención ----
-        if (!empty($e['retencion_dias'])) {
-            $l[] = 'CONFIGURE RETENTION POLICY TO RECOVERY WINDOW OF ' . (int) $e['retencion_dias'] . ' DAYS;';
-            $l[] = '';
-        }
 
         // ---- Bloque RUN ----
         $l[] = 'RUN {';
 
         $paralelismo = max(1, (int) $e['paralelismo']);
         for ($i = 1; $i <= $paralelismo; $i++) {
-            $l[] = sprintf("  ALLOCATE CHANNEL ch%d DEVICE TYPE DISK;", $i);
+            $l[] = sprintf("  ALLOCATE CHANNEL ch%d DEVICE TYPE %s;", $i, $this->tipoDispositivo());
         }
         $l[] = '';
 
@@ -290,14 +330,6 @@ class RmanBuilder
             $l[] = '  BACKUP CURRENT CONTROLFILE' . $this->formatoSufijo('ctl') . ';';
         }
 
-        // Limpieza según retención
-        if (!empty($e['retencion_dias'])) {
-            $l[] = '';
-            $l[] = '  CROSSCHECK BACKUP;';
-            $l[] = '  DELETE NOPROMPT EXPIRED BACKUP;';
-            $l[] = '  DELETE NOPROMPT OBSOLETE;';
-        }
-
         for ($i = 1; $i <= $paralelismo; $i++) {
             $l[] = sprintf("  RELEASE CHANNEL ch%d;", $i);
         }
@@ -311,12 +343,38 @@ class RmanBuilder
             // RESTORE ... VALIDATE elige los respaldos que usaría una
             // restauración real y los lee completos. (VALIDATE BACKUPSET exige
             // números de backupset concretos; "ALL" no es sintaxis válida.)
-            $l[] = 'RESTORE ' . $this->objetoBackup() . ' VALIDATE;';
+            // En cinta hay que indicar el dispositivo: por defecto RMAN busca en disco.
+            $dev = $this->tipoDispositivo() === 'SBT' ? ' DEVICE TYPE SBT' : '';
+            $l[] = 'RESTORE ' . $this->objetoBackup() . ' VALIDATE' . $dev . ';';
             if ((int) $e['incluir_controlfile'] === 1) {
-                $l[] = 'RESTORE CONTROLFILE VALIDATE;';
+                $l[] = 'RESTORE CONTROLFILE VALIDATE' . $dev . ';';
             }
             if ((int) $e['incluir_spfile'] === 1) {
-                $l[] = 'RESTORE SPFILE VALIDATE;';
+                $l[] = 'RESTORE SPFILE VALIDATE' . $dev . ';';
+            }
+        }
+
+        // ---- Limpieza según retención: SIEMPRE después de verificar ----
+        // RMAN detiene el script si un comando falla: si la verificación
+        // no pasa, nunca se borran los respaldos anteriores que sí sirven.
+        // La ventana va en el propio comando (no CONFIGURE), así cada
+        // estrategia aplica la suya sin cambiar la política de toda la base.
+        $ventana = !empty($e['retencion_dias'])
+            ? ' RECOVERY WINDOW OF ' . (int) $e['retencion_dias'] . ' DAYS'
+            : '';
+        if ($ventana !== '') {
+            $l[] = '';
+            $l[] = (int) $e['verificar_respaldo'] === 1
+                ? '# Limpieza: solo se llega aquí si la verificación pasó.'
+                : '# Limpieza de respaldos fuera de la ventana de retención.';
+            if ($this->tipoDispositivo() === 'SBT') {
+                $l[] = 'ALLOCATE CHANNEL FOR MAINTENANCE DEVICE TYPE SBT;';
+            }
+            $l[] = 'CROSSCHECK BACKUP;';
+            $l[] = 'DELETE NOPROMPT EXPIRED BACKUP;';
+            $l[] = 'DELETE NOPROMPT OBSOLETE' . $ventana . ';';
+            if ($this->tipoDispositivo() === 'SBT') {
+                $l[] = 'RELEASE CHANNEL;';
             }
         }
 
@@ -324,7 +382,7 @@ class RmanBuilder
         $l[] = '';
         $l[] = '# Reporte para la evidencia de ejecución.';
         $l[] = 'LIST BACKUP SUMMARY;';
-        $l[] = 'REPORT NEED BACKUP;';
+        $l[] = 'REPORT NEED BACKUP' . $ventana . ';';
         $l[] = '';
         $l[] = 'EXIT;';
 
@@ -402,6 +460,11 @@ class RmanBuilder
     /** Sufijo FORMAT, solo si hay destino explícito (si no, va a la FRA). */
     private function formatoSufijo(string $extension): string
     {
+        $prefijo = isset($this->e['id']) ? self::codigo((int) $this->e['id']) : 'EST';
+        // En cinta no hay rutas: solo se nombra la pieza; el media manager la ubica.
+        if (($this->e['dispositivo'] ?? 'disco') === 'cinta') {
+            return " FORMAT '" . $prefijo . '_%d_%T_%s_%p.' . $extension . "'";
+        }
         $destino = trim((string) ($this->e['destino'] ?? ''));
         if ($destino === '' || strtoupper($destino) === 'FRA') {
             return '';
@@ -410,8 +473,144 @@ class RmanBuilder
         $sep = str_contains($destino, '\\') ? '\\' : '/';
         // Las piezas llevan el código de la estrategia: en la carpeta se ve
         // de un vistazo qué estrategia produjo cada archivo.
-        $prefijo = isset($this->e['id']) ? self::codigo((int) $this->e['id']) : 'EST';
         return " FORMAT '" . $destino . $sep . $prefijo . '_%d_%T_%s_%p.' . $extension . "'";
+    }
+
+    /** Tipo de dispositivo RMAN: DISK (disco local o de red) o SBT (cinta / media manager). */
+    private function tipoDispositivo(): string
+    {
+        return ($this->e['dispositivo'] ?? 'disco') === 'cinta' ? 'SBT' : 'DISK';
+    }
+
+    // =================================================================
+    // PLAN DE RECUPERACIÓN — se muestra, nunca se ejecuta desde aquí
+    // =================================================================
+
+    /**
+     * Qué respaldos hacen falta y qué instrucciones RMAN restaurarían lo que
+     * protege esta estrategia. Responde a la sección 14 del enunciado: la
+     * estrategia debe considerar también la posibilidad posterior de
+     * recuperación. Las operaciones de recuperación son destructivas y solo
+     * deben correrse en un ambiente controlado, por eso BackupGuard solo las
+     * muestra.
+     *
+     * @return array{necesarios: string[], script: string, notas: string[]}
+     */
+    public function planRecuperacion(): array
+    {
+        $e = $this->e;
+        $archivelog = ($this->bd['modo_archivado'] ?? '') === 'ARCHIVELOG';
+        $noArchivelog = ($this->bd['modo_archivado'] ?? '') === 'NOARCHIVELOG';
+        $dev = $this->tipoDispositivo();
+
+        // ---- Qué respaldos se necesitan
+        $necesarios = match ($e['tipo_respaldo']) {
+            'completo' => ['El último respaldo completo de esta estrategia.'],
+            'incremental_0' => ['El último respaldo incremental de nivel 0.'],
+            'incremental_1' => ($e['modalidad'] ?? '') === 'acumulativo'
+                ? ['Un respaldo incremental de nivel 0 (de otra estrategia de la misma base).',
+                   'Solo el último incremental acumulativo posterior a ese nivel 0.']
+                : ['Un respaldo incremental de nivel 0 (de otra estrategia de la misma base).',
+                   'Todos los incrementales diferenciales posteriores a ese nivel 0, en orden.'],
+            default => ['El último respaldo de la estrategia.'],
+        };
+        if ($archivelog) {
+            $necesarios[] = 'Los archived redo logs generados después del respaldo, para llevar la base hasta el último cambio o hasta un momento exacto.';
+        }
+        if ((int) $e['incluir_controlfile'] === 1) {
+            $necesarios[] = 'El respaldo del control file, si se perdió el actual.';
+        }
+        if ((int) $e['incluir_spfile'] === 1) {
+            $necesarios[] = 'El respaldo del SPFILE, si se perdió el archivo de parámetros.';
+        }
+
+        // ---- Script de restauración
+        $l = [];
+        $l[] = '# =====================================================================';
+        $l[] = '# Plan de recuperación — ' . (isset($e['id']) ? self::codigo((int) $e['id']) . ' - ' : '') . $e['nombre'];
+        $l[] = '# BackupGuard NO ejecuta este script. Las operaciones de recuperación';
+        $l[] = '# solo deben realizarse en un ambiente controlado (enunciado, sección 14).';
+        $l[] = '# =====================================================================';
+        $l[] = '';
+        $l[] = '# Paso previo, sin riesgo: muestra qué respaldos usaría RMAN, sin restaurar nada.';
+        $l[] = 'RESTORE ' . $this->objetoBackup() . ' PREVIEW;';
+        $l[] = '';
+
+        if ($e['alcance'] === 'base_completa') {
+            if ($noArchivelog) {
+                // Sin archived logs, la base vuelve al estado exacto del
+                // respaldo: se restaura también el control file de ese momento.
+                $l[] = '# 1. Restaurar el control file del respaldo y montar la base.';
+                $l[] = 'SHUTDOWN IMMEDIATE;';
+                $l[] = 'STARTUP NOMOUNT;';
+                $l[] = 'RESTORE CONTROLFILE FROM AUTOBACKUP;';
+                $l[] = 'ALTER DATABASE MOUNT;';
+            } else {
+                $l[] = '# 1. La base debe estar montada (no abierta) para restaurarla completa.';
+                $l[] = 'SHUTDOWN IMMEDIATE;';
+                $l[] = 'STARTUP MOUNT;';
+            }
+            $l[] = '';
+            $l[] = 'RUN {';
+            $l[] = "  ALLOCATE CHANNEL ch1 DEVICE TYPE $dev;";
+            if ($archivelog) {
+                $l[] = "  # Opcional: para volver a un momento exacto, descomentar y ajustar.";
+                $l[] = "  # SET UNTIL TIME \"TO_DATE('2026-10-05 08:00','YYYY-MM-DD HH24:MI')\";";
+            }
+            $l[] = '  RESTORE DATABASE;';
+            $l[] = $noArchivelog
+                ? '  RECOVER DATABASE NOREDO;   # sin archived logs: se vuelve al momento del respaldo'
+                : '  RECOVER DATABASE;          # aplica los incrementales y los archived redo logs';
+            $l[] = '  RELEASE CHANNEL ch1;';
+            $l[] = '}';
+            $l[] = '';
+            $l[] = '# 2. Abrir la base.';
+            $l[] = $noArchivelog ? 'ALTER DATABASE OPEN RESETLOGS;' : 'ALTER DATABASE OPEN;';
+            $l[] = '# Si se usó SET UNTIL TIME, abrir con: ALTER DATABASE OPEN RESETLOGS;';
+        } else {
+            $objetos = array_map(fn($o) => trim($o['nombre']), $this->objetos);
+            $esTs = $e['alcance'] === 'tablespaces';
+            $l[] = $esTs
+                ? '# La base sigue abierta: solo se restauran los tablespaces afectados.'
+                : '# La base sigue abierta: solo se restauran los datafiles afectados.';
+            foreach ($objetos as $o) {
+                $l[] = $esTs
+                    ? 'ALTER TABLESPACE ' . strtoupper($o) . ' OFFLINE IMMEDIATE;'
+                    : 'ALTER DATABASE DATAFILE ' . (ctype_digit($o) ? $o : "'" . $o . "'") . ' OFFLINE;';
+            }
+            $l[] = '';
+            $l[] = 'RUN {';
+            $l[] = "  ALLOCATE CHANNEL ch1 DEVICE TYPE $dev;";
+            $l[] = '  RESTORE ' . $this->objetoBackup() . ';';
+            $l[] = '  RECOVER ' . $this->objetoBackup() . ';';
+            $l[] = '  RELEASE CHANNEL ch1;';
+            $l[] = '}';
+            $l[] = '';
+            foreach ($objetos as $o) {
+                $l[] = $esTs
+                    ? 'ALTER TABLESPACE ' . strtoupper($o) . ' ONLINE;'
+                    : 'ALTER DATABASE DATAFILE ' . (ctype_digit($o) ? $o : "'" . $o . "'") . ' ONLINE;';
+            }
+        }
+
+        // ---- Notas
+        $notas = [];
+        if ($noArchivelog) {
+            $notas[] = 'La base está en NOARCHIVELOG: solo se puede volver al momento exacto del respaldo. Todo cambio posterior se pierde.';
+        } elseif ($archivelog) {
+            $notas[] = 'La base está en ARCHIVELOG: además de volver al último cambio, se puede recuperar hasta un momento exacto con SET UNTIL TIME.';
+        } else {
+            $notas[] = 'No se conoce el modo de archivado de la base: verificala para saber hasta dónde se puede recuperar.';
+        }
+        if ($e['alcance'] !== 'base_completa' && !$archivelog) {
+            $notas[] = 'Restaurar tablespaces o datafiles con la base abierta requiere modo ARCHIVELOG.';
+        }
+        if ($e['tipo_respaldo'] === 'incremental_1') {
+            $notas[] = 'Esta estrategia por sí sola no alcanza para restaurar: necesita un nivel 0 de otra estrategia de la misma base.';
+        }
+        $notas[] = 'RMAN elige automáticamente las piezas de respaldo necesarias; RESTORE ... PREVIEW permite comprobarlo antes.';
+
+        return ['necesarios' => $necesarios, 'script' => implode("\n", $l), 'notas' => $notas];
     }
 
     /** Código de catálogo de una estrategia: EST001, EST002… (también nombre del .rma). */
@@ -433,11 +632,21 @@ class RmanBuilder
     }
 
     /** Etiqueta RMAN: permite ubicar después qué estrategia produjo el respaldo. */
+    /**
+     * TAG del respaldo: código de la estrategia + tipo (EST001_INC0, EST002_INC1D…).
+     * Coincide con el nombre del archivo EST###.rma y con las piezas en disco,
+     * así se reconoce de un vistazo qué estrategia produjo cada respaldo.
+     */
     private function tag(): string
     {
-        $base = 'BG_' . preg_replace('/[^A-Z0-9]/', '', strtoupper($this->e['nombre']));
-        $base = substr($base, 0, 20);
-        return $base . '_' . strtoupper(substr($this->e['tipo_respaldo'], 0, 6));
+        $codigo = isset($this->e['id']) ? self::codigo((int) $this->e['id']) : 'EST';
+        $tipo = match ($this->e['tipo_respaldo']) {
+            'completo'      => 'FULL',
+            'incremental_0' => 'INC0',
+            'incremental_1' => ($this->e['modalidad'] ?? '') === 'acumulativo' ? 'INC1A' : 'INC1D',
+            default         => 'BKP',
+        };
+        return $codigo . '_' . $tipo;
     }
 
     public function etiquetaTipo(): string
@@ -493,13 +702,20 @@ class RmanBuilder
         }
         if (!empty($e['retencion_dias'])) {
             $pasos[] = ['CÓMO', 'Retención de ' . (int) $e['retencion_dias'] . ' días → ' .
-                                'CONFIGURE RETENTION POLICY + DELETE OBSOLETE'];
+                                'DELETE OBSOLETE RECOVERY WINDOW OF ' . (int) $e['retencion_dias'] .
+                                ' DAYS, después de verificar'];
         }
 
         $pasos[] = ['CUÁNDO', Programacion::describir($e)];
-        $pasos[] = ['DESTINO', trim((string) $e['destino']) === ''
-            ? 'Fast Recovery Area de la base (sin cláusula FORMAT)'
-            : 'FORMAT hacia ' . $e['destino']];
+        $disp = trim((string) ($e['dispositivo_id'] ?? ''));
+        if (($e['dispositivo'] ?? 'disco') === 'cinta') {
+            $pasos[] = ['DESTINO', 'Cinta → DEVICE TYPE SBT (media manager)' . ($disp !== '' ? ' · ' . $disp : '')];
+        } else {
+            $pasos[] = ['DESTINO', 'Disco → DEVICE TYPE DISK' . ($disp !== '' ? ' · ' . $disp : '')];
+            $pasos[] = ['DESTINO', trim((string) $e['destino']) === ''
+                ? 'Fast Recovery Area de la base (sin cláusula FORMAT)'
+                : 'FORMAT hacia ' . $e['destino']];
+        }
 
         return $pasos;
     }
