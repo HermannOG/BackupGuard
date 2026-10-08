@@ -555,7 +555,7 @@ class RmanBuilder
             $l[] = "  ALLOCATE CHANNEL ch1 DEVICE TYPE $dev;";
             if ($archivelog) {
                 $l[] = "  # Opcional: para volver a un momento exacto, descomentar y ajustar.";
-                $l[] = "  # SET UNTIL TIME \"TO_DATE('2026-10-05 08:00','YYYY-MM-DD HH24:MI')\";";
+                $l[] = "  # SET UNTIL TIME \"TO_DATE('" . date('Y-m-d') . " 08:00','YYYY-MM-DD HH24:MI')\";";
             }
             $l[] = '  RESTORE DATABASE;';
             $l[] = $noArchivelog
