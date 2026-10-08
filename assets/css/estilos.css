@@ -895,6 +895,22 @@ details.panel.desplegable[open] .desplegable-flecha{ transform: rotate(225deg); 
 #recuperacion .rejilla{ margin-bottom: 1rem; }
 #recuperacion .aviso{ margin-bottom: .5rem; }
 
+/* ------------------------------ Base verificada ------------------- */
+.verificada-titulo{ display: flex; align-items: center; gap: .75rem; margin-bottom: 1rem; }
+.verificada-titulo h2{ margin: 0; }
+.verificada-titulo .muted{ font-size: .82rem; }
+.verificada-check{
+    flex-shrink: 0; width: 32px; height: 32px; border-radius: 50%;
+    display: grid; place-items: center; font-weight: 700;
+    background: var(--ok); color: #0d1f17;
+}
+tr.fila-verificada td{ background: rgba(79,178,134,.07); }
+tr.fila-verificada{ box-shadow: inset 3px 0 0 var(--ok); }
+tr.fila-verificada .insignia.ok{ margin-left: .45rem; vertical-align: middle; }
+.estado-conexion{ font-size: .82rem; white-space: nowrap; }
+.estado-conexion.ok{ color: var(--ok); }
+.estado-conexion.pendiente{ color: var(--muted); }
+
 /* ------------------------------ Pie ------------------------------- */
 footer.pie{
     border-top: 1px solid var(--border); background: var(--surface);

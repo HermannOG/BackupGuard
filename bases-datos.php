@@ -19,6 +19,8 @@ $repo = new EstrategiaRepository();
 $mensaje = null;
 $error = null;
 $contexto = null;
+$verificadaId = null;   // base que se acaba de verificar con éxito
+$verificadaNombre = '';
 $avisoVerificar = false;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -69,7 +71,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $id = (int) ($_POST['id'] ?? 0);
             $contexto = refrescarModoArchivado($id);
-            $mensaje = 'Conexión correcta. Modo de archivado detectado: ' . $contexto['modo_archivado'] . '.';
+            $verificadaId = $id;
+            foreach ($repo->listarBases(true) as $bv) {
+                if ((int) $bv['id'] === $id) {
+                    $verificadaNombre = $bv['nombre'] . ' (' . ($bv['tns_alias'] ?: $bv['host'] . ':' . $bv['puerto'] . '/' . $bv['service_name']) . ')';
+                }
+            }
+            $mensaje = 'Conexión correcta con ' . $verificadaNombre . '. Modo de archivado detectado: '
+                     . $contexto['modo_archivado'] . '.';
 
         } elseif ($accion === 'eliminar') {
             requiereAdmin();
@@ -132,7 +141,13 @@ require_once __DIR__ . '/includes/navbar.php';
 
 <?php if ($contexto): ?>
   <div class="panel">
-    <h2>Lo que se leyó de <?= e($contexto['nombre_bd'] ?? 'la base') ?></h2>
+    <div class="verificada-titulo">
+      <span class="verificada-check" aria-hidden="true">✓</span>
+      <div>
+        <h2>Verificación de <?= e($verificadaNombre ?: ($contexto['nombre_bd'] ?? 'la base')) ?></h2>
+        <span class="muted">Conexión correcta · leído de Oracle el <?= formatoFecha(date('Y-m-d H:i:s')) ?></span>
+      </div>
+    </div>
     <div class="datos-fila">
       <div>
         <span class="dato-etiqueta">Modo de archivado
@@ -214,14 +229,16 @@ require_once __DIR__ . '/includes/navbar.php';
             <th>Archivado <?= ayuda('Columna Archivado',
                 'Se llena al presionar <b>Verificar</b>. «DESCONOCIDO» significa que todavía no se ha '
               . 'podido leer de Oracle.') ?></th>
-            <th>Último chequeo</th>
+            <th>Conexión verificada</th>
             <th></th>
           </tr>
         </thead>
         <tbody>
         <?php foreach ($bases as $b): ?>
-          <tr>
+          <?php $recien = $verificadaId !== null && (int) $b['id'] === $verificadaId; ?>
+          <tr class="<?= $recien ? 'fila-verificada' : '' ?>">
             <td><strong><?= e($b['nombre']) ?></strong>
+                <?php if ($recien): ?><span class="insignia ok">✓ Verificada ahora</span><?php endif; ?>
                 <?php if ($b['descripcion']): ?><br><span class="muted"><?= e($b['descripcion']) ?></span><?php endif; ?></td>
             <td><span class="insignia <?= $b['ambiente'] === 'produccion' ? 'warn' : 'neutra' ?>"><?= e($b['ambiente']) ?></span></td>
             <td class="mono">
@@ -231,7 +248,14 @@ require_once __DIR__ . '/includes/navbar.php';
               <span class="muted"><?= e($b['usuario']) ?> AS <?= (int) $b['conectar_as_sysdba'] === 1 ? 'SYSDBA' : 'SYSBACKUP' ?></span>
             </td>
             <td><?= insigniaArchivado($b['modo_archivado']) ?></td>
-            <td class="mono"><?= formatoFecha($b['ultimo_chequeo']) ?></td>
+            <td>
+              <?php if ($b['ultimo_chequeo']): ?>
+                <span class="estado-conexion ok">● Conexión correcta</span><br>
+                <span class="mono muted"><?= formatoFecha($b['ultimo_chequeo']) ?></span>
+              <?php else: ?>
+                <span class="estado-conexion pendiente">● Sin verificar</span>
+              <?php endif; ?>
+            </td>
             <td class="celda-acciones">
               <?php if (esAdmin()): ?>
                 <form method="post">
