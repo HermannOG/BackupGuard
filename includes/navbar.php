@@ -8,6 +8,7 @@ $enlaces = [
     'bases-datos.php' => 'Bases de datos',
     'historial.php'   => 'Historial',
     'alertas.php'     => 'Alertas',
+    'escenarios.php'  => 'Recuperación',
 ];
 $inicial = $u ? strtoupper(substr($u['nombre_usuario'], 0, 1)) : '';
 ?>

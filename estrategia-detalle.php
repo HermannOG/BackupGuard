@@ -421,6 +421,9 @@ require_once __DIR__ . '/includes/navbar.php';
             . '<span class="mono">RESTORE ... PREVIEW</span>, no modifica nada: solo muestra qué respaldos usaría RMAN. '
             . 'Las demás detienen o modifican la base, por eso solo deben correrse en un ambiente de pruebas.') ?></p>
   <pre class="script"><?= e($plan['script']) ?></pre>
+  <p class="nota">Este plan cubre la pérdida de lo que respalda esta estrategia. Para otros fallos (redo logs, control file,
+     SPFILE, errores de usuario) y para ver si la base está preparada para cada uno, revisá
+     <a href="escenarios.php?base=<?= (int) $e['base_datos_id'] ?>">Recuperación ante fallos →</a></p>
 </details>
 
 <!-- ===================== EVIDENCIA ===================== -->
