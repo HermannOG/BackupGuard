@@ -169,105 +169,109 @@ require_once __DIR__ . '/includes/navbar.php';
     </div>
   </div>
 
+  <p class="ayuda-tabla">Hacé clic en un escenario para ver sus causas, la estrategia a considerar y las instrucciones.</p>
   <div class="tabla-envoltura">
     <table class="tabla-escenarios">
       <thead>
         <tr><th>ID</th><th>Escenario</th><th>Exposición</th><th>Pérdida de datos</th><th>Recuperación</th>
-            <?php if ($ctx): ?><th>Cobertura</th><?php endif; ?></tr>
+            <?php if ($ctx): ?><th>Cobertura</th><?php endif; ?><th class="col-flecha"><span class="sr-only">Detalle</span></th></tr>
       </thead>
-      <tbody>
+      <?php $columnas = $ctx ? 7 : 6; ?>
       <?php foreach ($escenarios as $es): ?>
-        <tr data-cat="<?= e($es['categoria']) ?>">
-          <td><a class="codigo-mini" href="#<?= e($es['id']) ?>"><?= e($es['id']) ?></a></td>
-          <td><a href="#<?= e($es['id']) ?>" class="enlace-esc"><?= e($es['nombre']) ?></a></td>
+      <tbody class="grupo-esc" id="<?= e($es['id']) ?>" data-cat="<?= e($es['categoria']) ?>">
+        <tr class="fila-esc" tabindex="0" role="button" aria-expanded="false" aria-controls="det-<?= e($es['id']) ?>">
+          <td><span class="codigo-mini"><?= e($es['id']) ?></span></td>
+          <td><span class="enlace-esc"><?= e($es['nombre']) ?></span></td>
           <td><span class="insignia <?= $etqExp[$es['exposicion']] ?>"><?= e($es['exposicion']) ?></span></td>
           <td class="celda-chica"><?= e($es['perdida']) ?></td>
           <td class="celda-chica"><?= e($es['recuperacion']) ?></td>
           <?php if ($ctx): [$cls, $txt] = $etqCob[$es['cob'][0]]; ?>
             <td><span class="insignia <?= $cls ?>"><?= e($txt) ?></span></td>
           <?php endif; ?>
+          <td class="col-flecha"><span class="desplegable-flecha" aria-hidden="true"></span></td>
         </tr>
-      <?php endforeach; ?>
+        <tr class="fila-detalle" id="det-<?= e($es['id']) ?>" hidden>
+          <td colspan="<?= $columnas ?>">
+            <div class="esc-detalle">
+              <p class="esc-descripcion"><?= e($es['descripcion']) ?></p>
+              <div class="insignias-fila esc-riesgos">
+                <?php foreach ($es['riesgos'] as $r): ?><span class="riesgo"><?= e($r) ?></span><?php endforeach; ?>
+              </div>
+
+              <div class="esc-cuerpo">
+                <div class="esc-col">
+                  <p class="etiqueta-grupo">Posibles causas</p>
+                  <p><?= e($es['causas']) ?></p>
+                  <p class="etiqueta-grupo">Síntomas</p>
+                  <div class="insignias-fila">
+                    <?php foreach ($es['sintomas'] as $s): ?><span class="chip-cuando mono"><?= e($s) ?></span><?php endforeach; ?>
+                  </div>
+                  <p class="etiqueta-grupo">Cómo confirmarlo</p>
+                  <pre class="script script-chico"><?= e($es['detectar']) ?></pre>
+                </div>
+                <div class="esc-col">
+                  <p class="etiqueta-grupo">Estrategia a considerar</p>
+                  <p><?= e($es['estrategia']) ?></p>
+                  <?php if ($es['cob']): ?>
+                    <div class="aviso <?= ['cubierto' => 'exito', 'parcial' => 'advertencia', 'sin' => 'error', 'config' => 'informacion', 'noaplica' => 'informacion'][$es['cob'][0]] ?>">
+                      <span class="titulo">En <?= e($base['nombre']) ?>: <?= e($etqCob[$es['cob'][0]][1]) ?></span>
+                      <p><?= e($es['cob'][1]) ?></p>
+                    </div>
+                  <?php endif; ?>
+                </div>
+              </div>
+
+              <div class="esc-instrucciones">
+                <div class="esc-instr-cabeza">
+                  <p class="etiqueta-grupo">Instrucciones</p>
+                  <button type="button" class="boton boton-chico copiar" data-copiar="instr-<?= e($es['id']) ?>">Copiar</button>
+                </div>
+                <pre class="script" id="instr-<?= e($es['id']) ?>"><?= e($es['instrucciones']) ?></pre>
+                <?php if ($es['nota'] !== ''): ?><p class="nota"><?= e($es['nota']) ?></p><?php endif; ?>
+              </div>
+            </div>
+          </td>
+        </tr>
       </tbody>
+      <?php endforeach; ?>
     </table>
   </div>
 </div>
 
-<div class="lista-escenarios">
-<?php foreach ($escenarios as $es): ?>
-  <details class="panel escenario" id="<?= e($es['id']) ?>" data-cat="<?= e($es['categoria']) ?>">
-    <summary>
-      <span class="codigo-est"><?= e($es['id']) ?></span>
-      <div class="esc-titulo">
-        <h3><?= e($es['nombre']) ?></h3>
-        <p><?= e($es['descripcion']) ?></p>
-        <div class="insignias-fila">
-          <span class="insignia <?= $etqExp[$es['exposicion']] ?>">Exposición: <?= e($es['exposicion']) ?></span>
-          <?php foreach ($es['riesgos'] as $r): ?><span class="riesgo"><?= e($r) ?></span><?php endforeach; ?>
-          <?php if ($es['cob']): [$cls, $txt] = $etqCob[$es['cob'][0]]; ?>
-            <span class="insignia <?= $cls ?>"><?= e($txt) ?></span>
-          <?php endif; ?>
-        </div>
-      </div>
-      <span class="desplegable-flecha" aria-hidden="true"></span>
-    </summary>
-
-    <div class="esc-cuerpo">
-      <div class="esc-col">
-        <p class="etiqueta-grupo">Posibles causas</p>
-        <p><?= e($es['causas']) ?></p>
-        <p class="etiqueta-grupo">Síntomas</p>
-        <div class="insignias-fila">
-          <?php foreach ($es['sintomas'] as $s): ?><span class="chip-cuando mono"><?= e($s) ?></span><?php endforeach; ?>
-        </div>
-        <p class="etiqueta-grupo">Cómo confirmarlo</p>
-        <pre class="script script-chico"><?= e($es['detectar']) ?></pre>
-        <dl class="datos-lista">
-          <dt>Pérdida de datos</dt><dd><?= e($es['perdida']) ?></dd>
-          <dt>Tipo de recuperación</dt><dd><?= e($es['recuperacion']) ?></dd>
-        </dl>
-      </div>
-      <div class="esc-col">
-        <p class="etiqueta-grupo">Estrategia a considerar</p>
-        <p><?= e($es['estrategia']) ?></p>
-        <?php if ($es['cob']): ?>
-          <div class="aviso <?= ['cubierto' => 'exito', 'parcial' => 'advertencia', 'sin' => 'error', 'config' => 'informacion', 'noaplica' => 'informacion'][$es['cob'][0]] ?>">
-            <span class="titulo">En <?= e($base['nombre']) ?>: <?= e($etqCob[$es['cob'][0]][1]) ?></span>
-            <p><?= e($es['cob'][1]) ?></p>
-          </div>
-        <?php endif; ?>
-      </div>
-    </div>
-
-    <div class="esc-instrucciones">
-      <div class="esc-instr-cabeza">
-        <p class="etiqueta-grupo">Instrucciones</p>
-        <button type="button" class="boton boton-chico copiar" data-copiar="instr-<?= e($es['id']) ?>">Copiar</button>
-      </div>
-      <pre class="script" id="instr-<?= e($es['id']) ?>"><?= e($es['instrucciones']) ?></pre>
-      <?php if ($es['nota'] !== ''): ?><p class="nota"><?= e($es['nota']) ?></p><?php endif; ?>
-    </div>
-  </details>
-<?php endforeach; ?>
-</div>
-
 <script>
 (function () {
-  // Filtro por categoría (tabla y fichas)
+  // Desplegar el detalle de un escenario en la misma tabla
+  function alternar(fila, abrir) {
+    var det = document.getElementById(fila.getAttribute('aria-controls'));
+    abrir = abrir === undefined ? fila.getAttribute('aria-expanded') !== 'true' : abrir;
+    fila.setAttribute('aria-expanded', abrir ? 'true' : 'false');
+    fila.parentNode.classList.toggle('abierto', abrir);
+    det.hidden = !abrir;
+  }
+  document.querySelectorAll('.fila-esc').forEach(function (f) {
+    f.addEventListener('click', function () { alternar(f); });
+    f.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); alternar(f); }
+    });
+  });
+  // Filtro por categoría
   document.querySelectorAll('.chip-filtro').forEach(function (b) {
     b.addEventListener('click', function () {
       var cat = b.getAttribute('data-cat');
       document.querySelectorAll('.chip-filtro').forEach(function (x) { x.classList.toggle('activo', x === b); });
-      document.querySelectorAll('[data-cat]').forEach(function (el) {
-        if (el.classList.contains('chip-filtro')) return;
-        el.hidden = cat !== '' && el.getAttribute('data-cat') !== cat;
+      document.querySelectorAll('.grupo-esc').forEach(function (g) {
+        g.hidden = cat !== '' && g.getAttribute('data-cat') !== cat;
       });
     });
   });
-  // Abrir la ficha al llegar por enlace (#ESC-xx)
+  // Abrir el escenario al llegar por enlace (#ESC-xx)
   function abrirHash() {
-    var el = location.hash && document.getElementById(location.hash.slice(1));
-    if (el && el.tagName === 'DETAILS') { el.open = true; }
+    var g = location.hash && document.getElementById(location.hash.slice(1));
+    if (g && g.classList.contains('grupo-esc')) {
+      if (g.hidden) { document.querySelector('.chip-filtro[data-cat=""]').click(); }
+      alternar(g.querySelector('.fila-esc'), true);
+      g.scrollIntoView({ block: 'start' });
+    }
   }
   window.addEventListener('hashchange', abrirHash); abrirHash();
   // Copiar instrucciones

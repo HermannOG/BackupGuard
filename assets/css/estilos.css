@@ -1026,20 +1026,22 @@ input[type=date]::-webkit-calendar-picker-indicator:hover{ opacity: 1; }
 .tabla-escenarios td{ vertical-align: middle; }
 .tabla-escenarios .celda-chica{ font-size: .82rem; color: var(--muted); }
 .enlace-esc{ color: var(--text); font-weight: 500; }
-.enlace-esc:hover{ color: var(--amber); }
-.lista-escenarios{ margin-top: 1.2rem; display: grid; gap: .8rem; }
-.lista-escenarios > .panel + .panel{ margin-top: 0; }
-details.escenario > summary{
-    list-style: none; cursor: pointer; display: flex; gap: .9rem; align-items: flex-start;
-}
-details.escenario > summary::-webkit-details-marker{ display: none; }
-details.escenario .codigo-est{ flex-shrink: 0; margin-top: .1rem; }
-.esc-titulo{ flex: 1; min-width: 0; }
-.esc-titulo h3{ margin: 0 0 .2rem; font-size: 1.05rem; }
-.esc-titulo p{ margin: 0 0 .5rem; color: var(--muted); font-size: .88rem; max-width: none; }
-details.escenario .desplegable-flecha{ margin-top: .5rem; }
-details.escenario[open] .desplegable-flecha{ transform: rotate(225deg); }
-details.escenario[open] > summary{ margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border); }
+.ayuda-tabla{ margin: -.2rem 0 .8rem; font-size: .85rem; color: var(--muted); max-width: none; }
+.fila-esc{ cursor: pointer; }
+.fila-esc:hover td{ background: rgba(255,255,255,.025); }
+.fila-esc:hover .enlace-esc{ color: var(--amber); }
+.fila-esc:focus-visible{ outline: 2px solid var(--amber); outline-offset: -2px; }
+.tabla-escenarios .col-flecha{ width: 2.5rem; text-align: center; }
+.fila-esc .desplegable-flecha{ display: inline-block; }
+.grupo-esc.abierto .fila-esc .desplegable-flecha{ transform: rotate(225deg); }
+.grupo-esc.abierto .fila-esc td{ background: rgba(240,162,71,.06); border-bottom-color: transparent; }
+.grupo-esc.abierto .enlace-esc{ color: var(--amber); }
+.fila-detalle > td{ background: rgba(240,162,71,.03); padding: .4rem 1.1rem 1.4rem; }
+.tabla-escenarios .fila-detalle:hover{ background: transparent; }
+.sr-only{ position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.esc-detalle{ border-left: 2px solid rgba(240,162,71,.5); padding-left: 1.1rem; }
+.esc-descripcion{ margin: 0 0 .5rem; font-size: .95rem; max-width: none; }
+.esc-riesgos{ margin-bottom: 1rem; }
 .esc-cuerpo{ display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
 .esc-col p{ max-width: none; font-size: .9rem; }
 .esc-col .etiqueta-grupo{ margin-top: .6rem; }
