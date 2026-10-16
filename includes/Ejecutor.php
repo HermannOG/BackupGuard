@@ -24,6 +24,7 @@ require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/oracle.php';
 require_once __DIR__ . '/Programacion.php';
 require_once __DIR__ . '/EstrategiaRepository.php';
+require_once __DIR__ . '/Correo.php';
 
 class Ejecutor
 {
@@ -129,6 +130,12 @@ class Ejecutor
             bitacora('ejecucion', 'estrategias', $estrategiaId,
                 'Resultado: ' . $resultado . ($simular ? ' (simulado)' : ''));
 
+            // Un fallo se avisa por correo a todo el equipo, con el log adjunto,
+            // para que alguien revise y relance el respaldo de forma manual.
+            if ($resultado === 'fallido') {
+                (new Correo())->notificarFallo($ejecucionId);
+            }
+
             return $ejecucionId;
 
         } catch (Throwable $ex) {
@@ -147,6 +154,7 @@ class Ejecutor
                 'simulado'  => 0,
             ]);
             $this->repo->recalcularProxima($estrategiaId);
+            (new Correo())->notificarFallo($ejecucionId);
             throw $ex;
         }
     }

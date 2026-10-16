@@ -56,4 +56,21 @@ return [
     // Zona horaria con la que se programa y se registra todo.
     // PHP y MySQL usan esta misma, para que la programación no se corra.
     'zona_horaria' => 'America/Costa_Rica',
+
+    // --- Aviso por correo cuando una ejecución falla ---
+    // Se envía a todos los destinatarios, con el .log de RMAN adjunto, para
+    // que alguien revise y ejecute la estrategia de forma manual.
+    // Con Gmail: activá la verificación en dos pasos y usá una "contraseña de
+    // aplicación" (16 letras), NO la contraseña normal de la cuenta.
+    'correo_activo'        => false,
+    'correo_host'          => 'smtp.gmail.com',
+    'correo_puerto'        => 465,            // TLS implícito
+    'correo_usuario'       => 'cuenta@gmail.com',
+    'correo_password'      => 'contraseña-de-aplicacion',
+    'correo_nombre'        => 'BackupGuard',
+    'correo_destinatarios' => [
+        // 'integrante1@est.una.ac.cr',
+    ],
+    // Base de los enlaces que trae el correo.
+    'url_app' => 'http://localhost:8080',
 ];
